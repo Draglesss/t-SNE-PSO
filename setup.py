@@ -11,7 +11,7 @@ setup(
     description="t-Distributed Stochastic Neighbor Embedding with Particle Swarm Optimization",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/dragless/t-SNE-PSO",
+    url="https://github.com/draglesss/t-SNE-PSO",
     packages=find_packages(),
     classifiers=[
         "Programming Language :: Python :: 3",
