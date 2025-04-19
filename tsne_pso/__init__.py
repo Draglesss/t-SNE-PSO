@@ -8,5 +8,5 @@ Expert Systems with Applications, 269, 126398.
 
 from ._tsne_pso import TSNEPSO
 
-__version__ = "1.1.2"
+__version__ = "1.1.3"
 __all__ = ["TSNEPSO"] 

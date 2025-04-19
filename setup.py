@@ -5,7 +5,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setup(
     name="tsne_pso",
-    version="1.1.2",
+    version="1.1.3",
     author="Otmane Fatteh",
     author_email="fattehotmane@hotmail.com",
     description="t-Distributed Stochastic Neighbor Embedding with Particle Swarm Optimization",

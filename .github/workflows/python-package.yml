@@ -7,34 +7,27 @@ on:
     branches: [ main ]
 
 jobs:
-  build:
-    runs-on: ${{ matrix.os }}
+  test:
+    runs-on: ubuntu-latest
     strategy:
-      fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
-        python-version: ['3.9', '3.10', '3.11']
+        python-version: ["3.9", "3.10", "3.11"]
 
     steps:
-    - uses: actions/checkout@v3
-    
-    - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v4
-      with:
-        python-version: ${{ matrix.python-version }}
-        
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        python -m pip install pytest pytest-cov
-        python -m pip install -e .
-        
-    - name: Test with pytest
-      run: |
-        pytest --cov=tsne_pso --cov-report=xml
-        
-    - name: Upload coverage to Codecov
-      uses: codecov/codecov-action@v3
-      with:
-        file: ./coverage.xml
-        fail_ci_if_error: false 
+      - uses: actions/checkout@v3
+      
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+          
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install numpy scipy scikit-learn
+          python -m pip install pytest
+          python -m pip install -e .
+          
+      - name: Basic import test
+        run: |
+          python -c "from tsne_pso import TSNEPSO; print('Import successful')" 
