@@ -9,7 +9,15 @@ description = "t-Distributed Stochastic Neighbor Embedding with Particle Swarm O
 readme = "README.md"
 requires-python = ">=3.9"
 license = "BSD-3-Clause"
+license-files = ["LICENSE"]
 authors = [
+    {name = "Allaoui, Mebarka"},
+    {name = "Belhaouari, Samir Brahim"},
+    {name = "Hedjam, Rachid"},
+    {name = "Bouanane, Khadra"},
+    {name = "Kherfi, Mohammed Lamine"}
+]
+maintainers = [
     {name = "Otmane Fatteh", email = "fattehotmane@hotmail.com"}
 ]
 classifiers = [
