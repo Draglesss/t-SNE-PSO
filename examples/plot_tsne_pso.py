@@ -3,7 +3,7 @@
 t-SNE with Particle Swarm Optimization (PSO)
 ====================================================
 
-An example of t-SNE with Particle Swarm Optimization (PSO) 
+An example of t-SNE with Particle Swarm Optimization (PSO)
 applied to the MNIST digits dataset.
 
 This visualization demonstrates how TSNE-PSO can create well-separated clusters
