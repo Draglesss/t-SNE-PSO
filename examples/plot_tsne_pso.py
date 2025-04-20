@@ -19,7 +19,6 @@ from sklearn.manifold import TSNE
 
 from tsne_pso import TSNEPSO
 
-
 # Load data
 digits = load_digits()
 X = digits.data
@@ -28,7 +27,7 @@ labels = digits.target_names
 
 # Reduce dimensionality with standard t-SNE
 print("Computing standard t-SNE embedding...")
-tsne = TSNE(n_components=2, init='pca', random_state=42)
+tsne = TSNE(n_components=2, init="pca", random_state=42)
 X_tsne = tsne.fit_transform(X)
 
 # Reduce dimensionality with t-SNE PSO
@@ -48,19 +47,19 @@ plt.figure(figsize=(15, 6))
 
 # Standard t-SNE
 plt.subplot(121)
-scatter = plt.scatter(X_tsne[:, 0], X_tsne[:, 1], c=y, cmap='tab10')
-plt.title('Standard t-SNE')
-plt.colorbar(scatter, ticks=range(10), label='Digit')
+scatter = plt.scatter(X_tsne[:, 0], X_tsne[:, 1], c=y, cmap="tab10")
+plt.title("Standard t-SNE")
+plt.colorbar(scatter, ticks=range(10), label="Digit")
 plt.grid(True)
 
 # t-SNE with PSO
 plt.subplot(122)
-scatter = plt.scatter(X_tsne_pso[:, 0], X_tsne_pso[:, 1], c=y, cmap='tab10')
-plt.title('t-SNE with Particle Swarm Optimization')
-plt.colorbar(scatter, ticks=range(10), label='Digit')
+scatter = plt.scatter(X_tsne_pso[:, 0], X_tsne_pso[:, 1], c=y, cmap="tab10")
+plt.title("t-SNE with Particle Swarm Optimization")
+plt.colorbar(scatter, ticks=range(10), label="Digit")
 plt.grid(True)
 
-plt.suptitle('Comparison of t-SNE and t-SNE PSO on Digits Dataset')
+plt.suptitle("Comparison of t-SNE and t-SNE PSO on Digits Dataset")
 plt.tight_layout()
-plt.savefig('tsne_vs_tsne_pso.png', dpi=300)
+plt.savefig("tsne_vs_tsne_pso.png", dpi=300)
 plt.show()

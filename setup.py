@@ -1,11 +1,11 @@
-from setuptools import setup, find_packages
+from setuptools import find_packages, setup
 
 with open("README.md", "r", encoding="utf-8") as fh:
     long_description = fh.read()
 
 setup(
     name="tsne_pso",
-    version="1.1.3",
+    version="1.1.4",
     author="Otmane Fatteh",
     author_email="fattehotmane@hotmail.com",
     description="t-Distributed Stochastic Neighbor Embedding with Particle Swarm Optimization",
@@ -28,4 +28,4 @@ setup(
         "tqdm>=4.64.0",
     ],
     license="BSD-3-Clause",
-) 
+)

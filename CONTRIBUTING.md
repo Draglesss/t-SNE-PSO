@@ -20,17 +20,36 @@ cd t-SNE-PSO
 
 # Set up remote upstream
 git remote add upstream https://github.com/dragless/t-SNE-PSO.git
-
+```
 
 ## Setting up the Development Environment
+
+### Linux/macOS
 
 ```bash
 # Create a virtual environment
 python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+source venv/bin/activate
 
-# Install development dependencies
-pip install -e ".[dev]"
+# Set up using the provided script
+bash tools/setup_dev.sh
+
+# Install git hooks (optional but recommended)
+bash tools/install_hooks.sh
+```
+
+### Windows
+
+```powershell
+# Create a virtual environment
+python -m venv venv
+.\venv\Scripts\activate
+
+# Set up using the provided script
+.\tools\setup_dev.ps1
+
+# Install git hooks (optional but recommended)
+.\tools\install_hooks.ps1
 ```
 
 ## Making Changes
@@ -49,12 +68,30 @@ pip install -e ".[dev]"
 - Add appropriate docstrings following NumPy/SciPy conventions
 - Use type annotations where appropriate
 
+### Linting
+
+Run linting checks to ensure your code meets style guidelines:
+
+```bash
+# Linux/macOS
+bash tools/lint.sh
+
+# Windows
+.\tools\lint.ps1
+```
+
+If you've installed the git hooks, linting will automatically run before each commit.
+
 ## Testing
 
 Run the tests to ensure your changes don't break existing functionality:
 
 ```bash
-pytest
+# Run with coverage
+pytest --cov=tsne_pso tests/
+
+# Run specific tests
+pytest tests/test_tsne_pso.py
 ```
 
 ## Submitting Changes
@@ -93,5 +130,9 @@ Feature requests are welcome. Please provide:
 1. A clear description of the feature
 2. The motivation for the feature
 3. Possible implementation approaches if you have them
+
+## Continuous Integration
+
+The project uses GitHub Actions for CI/CD. When you submit a pull request, automated tests will run on multiple operating systems (Windows, Linux, macOS) and Python versions. Make sure your code passes all checks before requesting a review.
 
 Thank you for contributing to TSNE-PSO! 

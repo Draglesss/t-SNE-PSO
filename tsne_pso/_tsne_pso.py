@@ -1,9 +1,11 @@
-# Authors: Allaoui, Mebarka <mebarka.allaoui@gmail.com>
+# Authors: Allaoui, Mebarka
 #          Belhaouari, Samir Brahim
 #          Hedjam, Rachid
 #          Bouanane, Khadra
 #          Kherfi, Mohammed Lamine
-#          Otmane Fatteh <fattehotmane@hotmail.com>
+#
+# Maintained by: Otmane Fatteh <fattehotmane@hotmail.com>
+#
 # License: BSD 3 clause
 #
 # This implementation is based on the paper:
@@ -16,15 +18,13 @@ from numbers import Integral, Real
 
 import numpy as np
 from scipy.spatial.distance import pdist, squareform
-
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.decomposition import PCA
-from sklearn.manifold import TSNE
+from sklearn.manifold import TSNE, _utils
 from sklearn.metrics import pairwise_distances
 from sklearn.utils import check_random_state
 from sklearn.utils._param_validation import Interval, StrOptions
-from sklearn.utils.validation import check_is_fitted, check_array
-from sklearn.manifold import _utils
+from sklearn.utils.validation import check_array, check_is_fitted
 
 try:
     import umap
@@ -35,6 +35,7 @@ except ImportError:
 
 try:
     from tqdm import tqdm
+
     _TQDM_AVAILABLE = True
 except ImportError:
     _TQDM_AVAILABLE = False
@@ -44,11 +45,30 @@ MACHINE_EPSILON = np.finfo(np.double).eps
 
 # Define valid metrics from sklearn
 _VALID_METRICS = [
-    'cityblock', 'cosine', 'euclidean', 'l1', 'l2', 'manhattan',
-    'braycurtis', 'canberra', 'chebyshev', 'correlation', 'dice', 'hamming',
-    'jaccard', 'kulsinski', 'mahalanobis', 'minkowski', 'rogerstanimoto',
-    'russellrao', 'seuclidean', 'sokalmichener', 'sokalsneath', 'sqeuclidean',
-    'yule', 'precomputed'
+    "cityblock",
+    "cosine",
+    "euclidean",
+    "l1",
+    "l2",
+    "manhattan",
+    "braycurtis",
+    "canberra",
+    "chebyshev",
+    "correlation",
+    "dice",
+    "hamming",
+    "jaccard",
+    "kulsinski",
+    "mahalanobis",
+    "minkowski",
+    "rogerstanimoto",
+    "russellrao",
+    "seuclidean",
+    "sokalmichener",
+    "sokalsneath",
+    "sqeuclidean",
+    "yule",
+    "precomputed",
 ]
 
 
@@ -79,25 +99,23 @@ def _joint_probabilities(distances, perplexity, verbose=False):
     """
     # Ensure distances are in the correct format
     distances = distances.astype(np.float32, copy=False)
-    
+
     # Use sklearn's _binary_search_perplexity for calculating conditional probabilities
     # This efficiently implements the binary search for sigma values that yield the desired perplexity
-    conditional_P = _utils._binary_search_perplexity(
-        distances, perplexity, verbose
-    )
-    
+    conditional_P = _utils._binary_search_perplexity(distances, perplexity, verbose)
+
     # Symmetrize the conditional probabilities to get joint probabilities
     # P_ij = (P_j|i + P_i|j) / (2n)
     P = conditional_P + conditional_P.T
-    
+
     # Normalize and convert to condensed matrix format for efficient storage
     sum_P = np.maximum(np.sum(P), MACHINE_EPSILON)
     P = np.maximum(squareform(P) / sum_P, MACHINE_EPSILON)
-    
+
     # Final validation to ensure numerical stability
     assert np.all(np.isfinite(P)), "Joint probability matrix contains invalid values"
     assert np.all(P >= 0), "Joint probability matrix contains negative values"
-    
+
     return P
 
 
@@ -565,7 +583,7 @@ class TSNEPSO(TransformerMixin, BaseEstimator):
         n_samples = X.shape[0]
         # We issue a warning if perplexity is too close to n_samples
         perplexity_threshold = 0.99 * n_samples  # 99% of n_samples
-        
+
         if self.perplexity >= n_samples:
             # Adjust perplexity to be slightly less than n_samples
             self._perplexity_value = max(1.0, (n_samples - 1) / 3.0)
@@ -615,17 +633,24 @@ class TSNEPSO(TransformerMixin, BaseEstimator):
             distances = pairwise_distances(
                 X, metric=self.metric, squared=True, n_jobs=self.n_jobs, **metric_params
             )
-            
+
         # Add assertion to validate distances matrix
-        assert distances.shape == (n_samples, n_samples), "Distance matrix shape mismatch"
+        assert distances.shape == (
+            n_samples,
+            n_samples,
+        ), "Distance matrix shape mismatch"
         assert np.all(np.isfinite(distances)), "Distance matrix contains invalid values"
 
         # Compute joint probabilities
         P = _joint_probabilities(distances, self._perplexity_value, self.verbose > 0)
-        
+
         # Assert P is valid
-        assert P.shape == ((n_samples * (n_samples - 1)) // 2,), "Joint probability shape mismatch"
-        assert np.all(np.isfinite(P)), "Joint probability matrix contains invalid values"
+        assert P.shape == (
+            (n_samples * (n_samples - 1)) // 2,
+        ), "Joint probability shape mismatch"
+        assert np.all(
+            np.isfinite(P)
+        ), "Joint probability matrix contains invalid values"
         assert np.all(P >= 0), "Joint probability matrix contains negative values"
 
         # Apply early exaggeration to P
@@ -796,18 +821,24 @@ class TSNEPSO(TransformerMixin, BaseEstimator):
         n_iter_without_progress = 0
         best_error = global_best_score
         all_best_scores = [global_best_score]
-        max_iter_without_progress = 50  # Maximum iterations without improvement before early stopping
+        max_iter_without_progress = (
+            50  # Maximum iterations without improvement before early stopping
+        )
         best_position_history = [global_best_position.copy()]
 
         if _TQDM_AVAILABLE:
-            iterator = tqdm(range(self.n_iter)) if self.verbose > 0 else range(self.n_iter)
+            iterator = (
+                tqdm(range(self.n_iter)) if self.verbose > 0 else range(self.n_iter)
+            )
         else:
             iterator = range(self.n_iter)
             if self.verbose:
                 print("tqdm not available. Not showing progress bar.")
 
         exaggeration_phase = True
-        exaggeration_iter = min(250, self.n_iter // 4)  # Use 25% of iterations for exaggeration
+        exaggeration_iter = min(
+            250, self.n_iter // 4
+        )  # Use 25% of iterations for exaggeration
 
         for iter_num in iterator:
             # Check if we should end early exaggeration phase
@@ -818,13 +849,13 @@ class TSNEPSO(TransformerMixin, BaseEstimator):
                     particle["P"] = particle["P"] / self.early_exaggeration
                 if self.verbose:
                     print(f"Ending early exaggeration phase at iteration {iter_num}")
-            
+
             # Adjust parameters adaptively based on progress
             progress_ratio = iter_num / self.n_iter
-            
+
             # Linearly decrease inertia weight over iterations for better convergence
             adaptive_inertia = self.inertia_weight * (1.0 - 0.7 * progress_ratio)
-            
+
             # Calculate cognitive and social weights using the formulas from the original paper:
             # - Cognitive weight (c1): Measures particle's attraction to its personal best position
             # - Social weight (c2): Measures particle's attraction to the global best position
@@ -832,7 +863,7 @@ class TSNEPSO(TransformerMixin, BaseEstimator):
             current_iter = iter_num + 1  # Use 1-indexed iteration count
             adaptive_cognitive = h - (h / (1.0 + (f / current_iter)))
             adaptive_social = h / (1.0 + (f / current_iter))
-            
+
             # Occasionally apply random perturbation to particles to help escape local minima
             # Probability decreases as iterations progress (simulated annealing approach)
             apply_perturbation = random_state.random() < 0.05 * (1.0 - progress_ratio)
@@ -857,7 +888,7 @@ class TSNEPSO(TransformerMixin, BaseEstimator):
                     + cognitive_component
                     + social_component
                 )
-                
+
                 # Apply velocity clamping to prevent excessive velocities
                 max_velocity = 0.1  # Can be adjusted
                 particle["velocity"] = np.clip(
@@ -867,18 +898,19 @@ class TSNEPSO(TransformerMixin, BaseEstimator):
                 # Update position
                 old_position = particle["position"].copy()
                 particle["position"] = particle["position"] + particle["velocity"]
-                
+
                 # Apply random perturbation to escape local minima if needed
                 if apply_perturbation and i % 3 == 0:  # Apply to some particles
-                    perturbation = random_state.normal(0, 0.01 * (1.0 - progress_ratio), 
-                                                    particle["position"].shape)
+                    perturbation = random_state.normal(
+                        0, 0.01 * (1.0 - progress_ratio), particle["position"].shape
+                    )
                     particle["position"] += perturbation
 
                 # Hybrid approach: Apply gradient descent with adaptive learning rate
                 if self.use_hybrid:
                     # Adjust learning rate based on iteration progress
                     adaptive_lr = learning_rate * (1.0 - 0.5 * progress_ratio)
-                    
+
                     # Apply gradient descent to every particle, but with different frequencies
                     if i % max(1, int(2 * (1 + progress_ratio))) == 0:
                         (
@@ -892,7 +924,8 @@ class TSNEPSO(TransformerMixin, BaseEstimator):
                             self.degrees_of_freedom,
                             n_samples,
                             self.n_components,
-                            momentum=0.5 + 0.3 * progress_ratio,  # Increase momentum over time
+                            momentum=0.5
+                            + 0.3 * progress_ratio,  # Increase momentum over time
                             learning_rate=adaptive_lr,
                             min_gain=0.01,
                             update=particle["grad_update"],
@@ -907,8 +940,8 @@ class TSNEPSO(TransformerMixin, BaseEstimator):
                     n_samples,
                     self.n_components,
                 )
-                
-                # Assert score is valid 
+
+                # Assert score is valid
                 assert np.isfinite(score), f"Invalid score at iteration {iter_num}"
 
                 # Update personal best
@@ -950,24 +983,30 @@ class TSNEPSO(TransformerMixin, BaseEstimator):
                 n_iter_without_progress = 0
             else:
                 n_iter_without_progress += 1
-                
+
                 # More strict convergence criteria as iterations progress
-                adaptive_patience = max(10, int(max_iter_without_progress * (1.0 - 0.7 * progress_ratio)))
-                
+                adaptive_patience = max(
+                    10, int(max_iter_without_progress * (1.0 - 0.7 * progress_ratio))
+                )
+
                 if n_iter_without_progress >= adaptive_patience:
                     if self.verbose > 0:
                         print(f"Converged after {iter_num + 1} iterations")
                     break
-                    
+
             # Every 100 iterations, attempt to reinitialize worst performing particles
             if iter_num > 0 and iter_num % 100 == 0:
                 # Find worst performing particles
                 scores = [p["best_score"] for p in particles]
-                worst_idx = np.argsort(scores)[-max(1, self.n_particles // 5):]  # Reinitialize 20% worst
-                
+                worst_idx = np.argsort(scores)[
+                    -max(1, self.n_particles // 5) :
+                ]  # Reinitialize 20% worst
+
                 for idx in worst_idx:
                     # Reinitialize with a mix of global best and random exploration
-                    if random_state.random() < 0.7:  # 70% chance to use global best as base
+                    if (
+                        random_state.random() < 0.7
+                    ):  # 70% chance to use global best as base
                         new_position = global_best_position.copy()
                         # Add significant noise for exploration
                         noise = random_state.normal(0, 0.05, new_position.shape)
@@ -976,21 +1015,24 @@ class TSNEPSO(TransformerMixin, BaseEstimator):
                         particles[idx]["position"] = random_state.normal(
                             0, 0.01, particles[idx]["position"].shape
                         )
-                    
+
                     # Reset velocity for reinitialized particles
                     particles[idx]["velocity"] = random_state.normal(
                         0, 0.001, particles[idx]["velocity"].shape
                     )
-        
+
         # Store optimization history for analysis
         self.convergence_history_ = np.array(all_best_scores)
 
         # Reshape best position to embedding
         best_position = global_best_position.reshape(n_samples, self.n_components)
         best_cost = global_best_score
-        
+
         # Final assertions to validate output
-        assert best_position.shape == (n_samples, self.n_components), "Invalid embedding shape"
+        assert best_position.shape == (
+            n_samples,
+            self.n_components,
+        ), "Invalid embedding shape"
         assert np.all(np.isfinite(best_position)), "Embedding contains invalid values"
         assert np.isfinite(best_cost), "Invalid final cost"
 
@@ -1056,11 +1098,11 @@ class TSNEPSO(TransformerMixin, BaseEstimator):
 
         X = self._validate_data(X)
         n_samples = X.shape[0]
-        
+
         # Set n_features_in_ correctly
         if self.metric != "precomputed":
             self.n_features_in_ = X.shape[1]
-        
+
         self._check_params_vs_input(X)
 
         if not hasattr(self, "_perplexity_value"):

@@ -1,4 +1,5 @@
 """Tests for TSNE-PSO."""
+
 # Author: Otmane Fatteh <fattehotmane@hotmail.com>
 # License: BSD 3 clause
 
@@ -158,12 +159,14 @@ def test_tsnepso_transform_raises():
         n_particles=2,
         random_state=42,
     )
-    
+
     X = np.random.RandomState(42).normal(0, 1, (20, 5))
     tsne_pso.fit(X)
-    
+
     # Now try to transform new data
-    with pytest.raises(NotImplementedError, match="t-SNE does not support the transform"):
+    with pytest.raises(
+        NotImplementedError, match="t-SNE does not support the transform"
+    ):
         tsne_pso.transform(np.random.randn(10, 5))
 
 
@@ -176,6 +179,7 @@ def test_tsnepso_precomputed():
 
     # Compute pairwise distances
     from sklearn.metrics import pairwise_distances
+
     distances = pairwise_distances(X, metric="euclidean", squared=True)
 
     # Fit TSNEPSO with precomputed distances
@@ -201,7 +205,9 @@ def test_tsnepso_precomputed():
     # Test for negative distances
     negative_dist = -np.ones((10, 10))
     tsne_pso = TSNEPSO(metric="precomputed")
-    with pytest.raises(ValueError, match="Precomputed distance contains negative values"):
+    with pytest.raises(
+        ValueError, match="Precomputed distance contains negative values"
+    ):
         tsne_pso.fit(negative_dist)
 
 

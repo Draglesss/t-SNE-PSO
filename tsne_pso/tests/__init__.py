@@ -1,1 +1,1 @@
-"""Test modules for TSNE-PSO.""" 
+"""Test modules for TSNE-PSO."""
