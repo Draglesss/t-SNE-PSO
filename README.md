@@ -129,4 +129,4 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 
 ## License
 
-BSD-3-Clause License (same as scikit-learn) 
+BSD-3-Clause License
