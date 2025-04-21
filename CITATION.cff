@@ -36,7 +36,7 @@ preferred-citation:
   volume: 269
   pages: 126398
   year: 2025
-  doi: "10.1016/j.eswa.2024.126398"
+  doi: "10.1016/j.eswa.2025.126398"
 repository-code: "https://github.com/Draglesss/t-SNE-PSO"
 url: "https://github.com/Draglesss/t-SNE-PSO"
 abstract: "t-Distributed Stochastic Neighbor Embedding with Particle Swarm Optimization (t-SNE-PSO) is a dimensionality reduction technique that optimizes t-SNE using particle swarm optimization. This approach can be more effective at avoiding local minima and often produces embeddings with better cluster separation."
