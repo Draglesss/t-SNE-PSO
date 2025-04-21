@@ -1,0 +1,50 @@
+cff-version: 1.2.0
+title: t-SNE-PSO
+type: software
+version: 1.1.5
+authors:
+  - family-names: "Allaoui"
+    given-names: "Mebarka"
+  - family-names: "Belhaouari"
+    given-names: "Samir Brahim"
+  - family-names: "Hedjam"
+    given-names: "Rachid"
+  - family-names: "Bouanane"
+    given-names: "Khadra"
+  - family-names: "Kherfi"
+    given-names: "Mohammed Lamine"
+  - family-names: "Fatteh"
+    given-names: "Otmane"
+    email: "fattehotmane@hotmail.com"
+    affiliation: "Maintainer"
+message: "If you use t-SNE-PSO in a scientific publication, we would appreciate citations to the following paper:"
+preferred-citation:
+  type: article
+  title: "t-SNE-PSO: Optimizing t-SNE using particle swarm optimization"
+  authors:
+  - family-names: "Allaoui"
+    given-names: "Mebarka"
+  - family-names: "Belhaouari"
+    given-names: "Samir Brahim"
+  - family-names: "Hedjam"
+    given-names: "Rachid"
+  - family-names: "Bouanane"
+    given-names: "Khadra"
+  - family-names: "Kherfi"
+    given-names: "Mohammed Lamine"
+  journal: "Expert Systems with Applications"
+  volume: 269
+  pages: 126398
+  year: 2025
+  doi: "10.1016/j.eswa.2024.126398"
+repository-code: "https://github.com/Draglesss/t-SNE-PSO"
+url: "https://github.com/Draglesss/t-SNE-PSO"
+abstract: "t-Distributed Stochastic Neighbor Embedding with Particle Swarm Optimization (t-SNE-PSO) is a dimensionality reduction technique that optimizes t-SNE using particle swarm optimization. This approach can be more effective at avoiding local minima and often produces embeddings with better cluster separation."
+keywords:
+  - "dimensionality reduction"
+  - "t-SNE"
+  - "particle swarm optimization"
+  - "data visualization"
+  - "machine learning"
+license: BSD-3-Clause
+date-released: "2023-04-20"
