@@ -8,4 +8,4 @@
 # Do not edit manually, as version changes should be managed
 # through version control (git tags) and CI/CD automation.
 
-__version__ = "1.1.5" 
+__version__ = "1.1.5"
