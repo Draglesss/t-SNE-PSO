@@ -14,4 +14,4 @@ def test_import():
     import tsne_pso
 
     assert hasattr(tsne_pso, "__version__")
-    assert tsne_pso.__version__ == "1.1.3"
+    assert tsne_pso.__version__ == "1.1.5"

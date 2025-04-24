@@ -1,11 +1,23 @@
+import os
+import re
 from setuptools import find_packages, setup
 
+# Get version
+with open(os.path.join("tsne_pso", "_version.py"), "r", encoding="utf-8") as f:
+    version_file = f.read()
+    version_match = re.search(r"^__version__ = ['\"]([^'\"]*)['\"]", version_file, re.M)
+    if version_match:
+        version = version_match.group(1)
+    else:
+        raise RuntimeError("Unable to find version string.")
+
+# Get long description
 with open("README.md", "r", encoding="utf-8") as fh:
     long_description = fh.read()
 
 setup(
     name="tsne_pso",
-    version="1.1.5",
+    version=version,
     author="Otmane Fatteh",
     author_email="fattehotmane@hotmail.com",
     description="t-Distributed Stochastic Neighbor Embedding with Particle Swarm Optimization",

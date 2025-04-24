@@ -130,3 +130,49 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 ## License
 
 BSD-3-Clause License
+
+## Development Setup
+
+For development, follow these steps:
+
+```bash
+# Clone the repository
+git clone https://github.com/draglesss/t-SNE-PSO.git
+cd t-SNE-PSO
+
+# Create and activate a virtual environment (optional but recommended)
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+
+# Install development dependencies
+pip install -r requirements-dev.txt
+
+# Install the package in development mode
+pip install -e .
+```
+
+### Running Tests
+
+```bash
+# Run all tests
+pytest
+
+# Run tests with coverage
+pytest --cov=tsne_pso
+
+# Run tests without the slow ones
+pytest -k "not slow"
+```
+
+### Code Formatting
+
+```bash
+# Format code with black
+black .
+
+# Sort imports with isort
+isort .
+
+# Run type checking with mypy
+mypy tsne_pso
+```
