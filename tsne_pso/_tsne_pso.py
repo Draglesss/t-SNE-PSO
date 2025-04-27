@@ -13,7 +13,9 @@
 # t-SNE-PSO: Optimizing t-SNE using particle swarm optimization.
 # Expert Systems with Applications, 269, 126398.
 
+import hashlib
 import logging
+import platform
 import warnings
 from numbers import Integral, Real
 from typing import Dict, Tuple
@@ -27,8 +29,6 @@ from sklearn.metrics import pairwise_distances
 from sklearn.utils import check_random_state
 from sklearn.utils._param_validation import Interval, StrOptions
 from sklearn.utils.validation import check_array, check_is_fitted
-import platform
-import hashlib
 
 try:
     import umap
@@ -44,7 +44,7 @@ try:
 except ImportError:
     _TQDM_AVAILABLE = False
 
-from .logging_config import get_logger, setup_logging
+from .logging_config import get_logger
 
 # Initialize logger
 logger = get_logger(__name__)
@@ -72,18 +72,19 @@ MIN_VAL = np.finfo(float).min
 _PLATFORM_SYSTEM = platform.system()
 _MAX_SEED_VALUE = 2**31 - 1  # Windows safe limit
 
+
 def _get_safe_random_seed(random_state):
     """Generate a random seed that is safe for all platforms while maintaining distribution quality.
-    
+
     Instead of simply truncating the range on Windows, this function ensures a consistent
     statistical distribution of seeds across all platforms by using a hash-based approach
     when needed.
-    
+
     Parameters
     ----------
     random_state : RandomState
         NumPy random state object
-        
+
     Returns
     -------
     int
@@ -91,16 +92,17 @@ def _get_safe_random_seed(random_state):
     """
     # Generate a full-range random number as a reference point
     full_range_random = random_state.randint(0, 2**32 - 1)
-    
+
     # For non-Windows platforms, we can directly use the full range
     if _PLATFORM_SYSTEM != "Windows":
         return full_range_random
-        
+
     hash_obj = hashlib.md5(str(full_range_random).encode())
     # Convert first 4 bytes of hash to integer and take modulo to fit within safe range
     mapped_value = int(hash_obj.hexdigest()[:8], 16) % _MAX_SEED_VALUE
-    
+
     return mapped_value
+
 
 def compute_joint_probabilities(
     distances: np.ndarray, perplexity: float, verbose: bool = False
