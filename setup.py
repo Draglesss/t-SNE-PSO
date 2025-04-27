@@ -1,37 +1,32 @@
 import os
 import re
 
-from setuptools import find_packages, setup
+from setuptools import setup
 
-# Get version
-with open(os.path.join("tsne_pso", "_version.py"), "r", encoding="utf-8") as f:
+# Read version from _version.py
+with open(os.path.join("tsne_pso", "_version.py"), "r") as f:
     version_file = f.read()
-    version_match = re.search(r"^__version__ = ['\"]([^'\"]*)['\"]", version_file, re.M)
+    version_match = re.search(r"__version__ = ['\"]([^'\"]*)['\"]", version_file)
     if version_match:
         version = version_match.group(1)
     else:
-        raise RuntimeError("Unable to find version string.")
-
-# Get long description
-with open("README.md", "r", encoding="utf-8") as fh:
-    long_description = fh.read()
+        version = "0.0.1"
 
 setup(
     name="tsne_pso",
     version=version,
-    author="Otmane Fatteh",
-    author_email="fattehotmane@hotmail.com",
     description="t-Distributed Stochastic Neighbor Embedding with Particle Swarm Optimization",
-    long_description=long_description,
+    long_description=open("README.md").read(),
     long_description_content_type="text/markdown",
+    author=(
+        "Allaoui, Mebarka; Belhaouari, Samir Brahim; Hedjam, Rachid; "
+        "Bouanane, Khadra; Kherfi, Mohammed Lamine"
+    ),
+    maintainer="Otmane Fatteh",
+    maintainer_email="fattehotmane@hotmail.com",
     url="https://github.com/draglesss/t-SNE-PSO",
-    packages=find_packages(),
-    classifiers=[
-        "Programming Language :: Python :: 3",
-        "Operating System :: OS Independent",
-        "Intended Audience :: Science/Research",
-        "Topic :: Scientific/Engineering :: Artificial Intelligence",
-    ],
+    license="BSD-3-Clause",
+    packages=["tsne_pso"],
     python_requires=">=3.9",
     install_requires=[
         "numpy>=1.19.5",
@@ -40,5 +35,10 @@ setup(
         "umap-learn>=0.5.3",
         "tqdm>=4.64.0",
     ],
-    license="BSD-3-Clause",
+    classifiers=[
+        "Programming Language :: Python :: 3",
+        "Operating System :: OS Independent",
+        "Intended Audience :: Science/Research",
+        "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    ],
 )

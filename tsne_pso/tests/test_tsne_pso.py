@@ -251,3 +251,28 @@ def test_tsnepso_random_state():
 
     # The embeddings should be identical
     assert np.allclose(embedding1, embedding2)
+
+
+# def test_tsnepso_debug_output():
+#     """Test that verbose output can be captured."""
+#     import io
+#     import sys
+#
+#     # Load data
+#     iris = load_iris()
+#     X = iris.data[:20]  # Small subset
+#
+#     # Redirect stdout
+#     old_stdout = sys.stdout
+#     sys.stdout = captured_output = io.StringIO()
+#
+#     # Fit with verbose=2
+#     TSNEPSO(verbose=2, random_state=0, n_iter=10).fit(X)
+#
+#     # Restore stdout
+#     sys.stdout = old_stdout
+#
+#     # Check that output was produced
+#     output = captured_output.getvalue()
+#     assert "Iteration" in output
+#     assert "New best score" in output

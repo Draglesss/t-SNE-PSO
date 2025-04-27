@@ -9,4 +9,7 @@ Expert Systems with Applications, 269, 126398.
 from ._tsne_pso import TSNEPSO
 from ._version import __version__
 
-__all__ = ["TSNEPSO", "__version__"]
+__all__ = [
+    "TSNEPSO",
+    "__version__",
+]

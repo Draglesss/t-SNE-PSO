@@ -24,6 +24,7 @@ wheels/
 .installed.cfg
 *.egg
 MANIFEST
+
 # PyInstaller
 #  Usually these files are written by a python script from a template
 #  before PyInstaller builds the exe, so as to inject date/other infos into it.
@@ -60,18 +61,38 @@ ENV/
 env.bak/
 venv.bak/
 
-# IDE
+# IDE project settings
 .idea/
 .vscode/
+.cursor/
 *.swp
 *.swo
-.spyderproject
-.spyproject
-.ropeproject
+.history/
 
-# OS specific
+# OS specific files
 .DS_Store
 Thumbs.db
+
+# Project specific
+history/
+.history/
+secrets_config.py
+.env
+.env.*
+!.env.example
+.secrets/
+credentials/
+**/token.json
+**/credentials.json
+
+# Temporary and backup files
+*.tmp
+*.bak
+*~
+
+# Local development artifacts
+.python-version
+.local/
 
 # Project specific
 examples/output/

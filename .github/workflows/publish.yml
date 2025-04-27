@@ -7,20 +7,47 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    environment: 
+      name: pypi
+      url: https://pypi.org/project/tsne-pso/
+    permissions:
+      id-token: write  # For PyPI trusted publishing
+      contents: read
+    
     steps:
-    - uses: actions/checkout@v4
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0  # Fetch all history for proper versioning
     
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
         python-version: '3.11'
+        cache: 'pip'
         
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install build wheel twine
+        pip install build wheel setuptools twine
         
-    - name: Build and package
+    - name: Verify version matches tag
+      run: |
+        # Extract tag version (without 'v' prefix if any)
+        TAG_VERSION=$(echo ${{ github.event.release.tag_name }} | sed 's/^v//')
+        echo "Tag version: $TAG_VERSION"
+        
+        # Get version from package
+        PACKAGE_VERSION=$(python setup.py --version)
+        echo "Package version: $PACKAGE_VERSION"
+        
+        # Ensure versions match
+        if [ "$TAG_VERSION" != "$PACKAGE_VERSION" ]; then
+          echo "::error::Version mismatch: Tag version ($TAG_VERSION) doesn't match package version ($PACKAGE_VERSION)"
+          exit 1
+        fi
+        
+    - name: Build package
       run: |
         python -m build
         
@@ -28,9 +55,32 @@ jobs:
       run: |
         twine check dist/*
         
-    - name: Publish package
+    - name: Get version from _version.py
+      id: get_version
+      run: |
+        VERSION=$(grep -oP "__version__ = '\K[^']+" tsne_pso/_version.py)
+        echo "VERSION=$VERSION" >> $GITHUB_ENV
+        echo "Version from _version.py: $VERSION"
+        
+    - name: Test package distribution
+      run: |
+        pip install dist/*.whl
+        python -c "import tsne_pso; print(f'Successfully installed {tsne_pso.__name__} version {tsne_pso.__version__}')"
+        
+    - name: Ensure only latest version is published
+      run: |
+        # Keep only the artifacts matching the version in _version.py
+        mkdir -p dist_latest
+        cp dist/*${{ env.VERSION }}* dist_latest/ || echo "No matching version found"
+        rm -rf dist
+        mv dist_latest dist
+        echo "Publishing only version ${{ env.VERSION }}"
+        ls -la dist/
+    - name: Publish package to PyPI
       uses: pypa/gh-action-pypi-publish@release/v1
       with:
         user: __token__
-        password: ${{ secrets.PYPI_API_TOKEN }}
+        password:  ${{ secrets.PYPI_API_TOKEN }}
         skip_existing: true 
+        verbose: true
+        verify_metadata: true

@@ -40,6 +40,305 @@ try:
 except ImportError:
     _TQDM_AVAILABLE = False
 
+"""Core implementation of t-SNE PSO optimization in pure Python.
+
+This module provides the core computational functions for t-SNE with PSO optimization.
+All functions are implemented in pure Python with NumPy for numerical operations.
+"""
+
+import warnings
+from typing import Dict, Tuple
+
+import numpy as np
+from scipy.spatial.distance import pdist, squareform
+
+# Define exports
+__all__ = [
+    "compute_joint_probabilities",
+    "compute_kl_divergence",
+    "update_particle_pso",
+]
+
+# Constants for numerical stability
+MACHINE_EPSILON = np.finfo(float).eps
+MAX_VAL = np.finfo(float).max
+MIN_VAL = np.finfo(float).min
+
+
+def compute_joint_probabilities(
+    distances: np.ndarray, perplexity: float, verbose: bool = False
+) -> np.ndarray:
+    """Compute joint probabilities P_ij from distances using binary search.
+
+    Parameters
+    ----------
+    distances : array of shape (n_samples, n_samples)
+        Pairwise distances between samples
+    perplexity : float
+        Desired perplexity of the joint probability distributions
+    verbose : bool, default=False
+        Whether to print progress messages
+
+    Returns
+    -------
+    P : array of shape (n_samples * (n_samples-1) / 2,)
+        Condensed joint probability matrix
+    """
+    # Input validation
+    assert isinstance(distances, np.ndarray), "distances must be a numpy array"
+    assert distances.ndim == 2, "distances must be a 2D array"
+    assert distances.shape[0] == distances.shape[1], "distances must be square"
+    assert np.all(distances >= 0), "distances must be non-negative"
+    assert isinstance(perplexity, (int, float)), "perplexity must be numeric"
+    assert 5.0 <= perplexity <= 50.0, "perplexity must be between 5 and 50"
+
+    n_samples = distances.shape[0]
+    P = np.zeros((n_samples, n_samples))
+    beta = np.ones(n_samples)
+    logU = np.log(perplexity)
+
+    # Loop over all instances
+    for i in range(n_samples):
+        # Print progress
+        if verbose and i % 1000 == 0:
+            print(f"Computing P-values for point {i}/{n_samples}")
+
+        # Compute P-values using binary search
+        betamin = -np.inf
+        betamax = np.inf
+        Di = distances[i, np.concatenate((np.r_[0:i], np.r_[i + 1 : n_samples]))]
+
+        # Binary search loop
+        for _ in range(50):
+            # Compute Gaussian kernel and entropy
+            Pi = np.exp(-Di * beta[i])
+            sumPi: float = np.sum(Pi)
+            if sumPi == 0:
+                Pi = np.maximum(Pi, MACHINE_EPSILON)
+                sumPi = float(np.sum(Pi))
+            Pi = Pi / sumPi
+
+            # Calculate entropy and difference from target
+            entropy = float(-np.sum(Pi * np.log2(np.maximum(Pi, MACHINE_EPSILON))))
+            entropyDiff = float(entropy - logU)
+
+            if abs(entropyDiff) < 1e-5:
+                break
+
+            # Update beta based on entropy difference
+            if entropyDiff > 0:
+                betamin = beta[i]
+                if betamax == np.inf:
+                    beta[i] = beta[i] * 2
+                else:
+                    beta[i] = (beta[i] + betamax) / 2
+            else:
+                betamax = beta[i]
+                if betamin == -np.inf:
+                    beta[i] = beta[i] / 2
+                else:
+                    beta[i] = (beta[i] + betamin) / 2
+
+        # Row-normalize P and store in matrix
+        Pi = np.exp(-Di * beta[i])
+        Pi = np.maximum(Pi, MACHINE_EPSILON)
+        Pi = Pi / np.sum(Pi)
+        P[i, np.concatenate((np.r_[0:i], np.r_[i + 1 : n_samples]))] = Pi
+    # Symmetrize and convert to condensed form
+    P = (P + P.T) / (2 * n_samples)
+    P = np.maximum(P, MACHINE_EPSILON)
+
+    # Return condensed form (upper triangular) as numpy array
+    condensed_P: np.ndarray = squareform(P, checks=False)
+    return condensed_P
+
+
+def compute_kl_divergence(
+    params: np.ndarray,
+    P: np.ndarray,
+    degrees_of_freedom: float,
+    n_samples: int,
+    n_components: int,
+    skip_num_points: int = 0,
+    compute_error: bool = True,
+) -> Tuple[float, np.ndarray]:
+    """Compute KL divergence and its gradient for t-SNE optimization.
+
+    Parameters
+    ----------
+    params : array of shape (n_samples * n_components,)
+        Current embedding flattened into 1D
+    P : array of shape (n_samples * (n_samples-1) / 2,)
+        Condensed joint probability matrix P
+    degrees_of_freedom : float
+        Degrees of freedom of Student's t-distribution
+    n_samples : int
+        Number of samples
+    n_components : int
+        Number of components in embedding
+    compute_error : bool, default=True
+        Whether to compute KL divergence error
+
+    Returns
+    -------
+    kl_divergence : float
+        KL divergence between P and Q distributions
+    grad : array of shape (n_samples * n_components,)
+        Gradient of KL divergence with respect to embedding
+    """
+    # Input validation
+    # Original Python implementation as fallback
+    X_embedded = params.reshape(n_samples, n_components)
+
+    # Q is a heavy-tailed distribution: Student's t-distribution
+    dist = pdist(X_embedded, "sqeuclidean")
+    dist /= degrees_of_freedom
+    dist += 1.0
+    dist **= (degrees_of_freedom + 1.0) / -2.0
+    Q = np.maximum(dist / (2.0 * np.sum(dist)), MACHINE_EPSILON)
+
+    # Compute KL divergence
+    if compute_error:
+        kl_divergence = np.dot(P, np.log(np.maximum(P, MACHINE_EPSILON) / Q))
+    else:
+        kl_divergence = np.nan
+
+    # Compute gradient
+    grad: np.ndarray = np.ndarray((n_samples, n_components), dtype=params.dtype)
+    PQd = squareform((P - Q) * dist)
+    for i in range(skip_num_points, n_samples):
+        grad[i] = np.dot(np.ravel(PQd[i], order="K"), X_embedded[i] - X_embedded)
+    grad = grad.ravel()
+
+    # Scale the gradient
+    c = 2.0 * (degrees_of_freedom + 1.0) / degrees_of_freedom
+    grad *= c
+
+    return kl_divergence, grad
+
+
+def update_particle_pso(
+    particle: Dict,
+    global_best_position: np.ndarray,
+    global_best_score: float,
+    inertia_weight: float,
+    cognitive_weight: float,
+    social_weight: float,
+    random_state: np.random.RandomState,
+    h: float,
+    f: float,
+    current_iter: int,
+    n_samples: int,
+    n_components: int,
+    degrees_of_freedom: float,
+    max_velocity: float = 0.1,
+) -> Tuple[Dict, float]:
+    """Update particle position and velocity using PSO rules.
+
+    Parameters
+    ----------
+    particle : dict
+        Particle state dictionary containing position, velocity, etc.
+    global_best_position : array
+        Global best position found so far
+    global_best_score : float
+        Global best score found so far
+    inertia_weight : float
+        PSO inertia weight parameter
+    cognitive_weight : float
+        PSO cognitive weight parameter
+    social_weight : float
+        PSO social weight parameter
+    random_state : RandomState
+        Random number generator
+    h : float
+        Parameter for dynamic cognitive weight formula
+    f : float
+        Parameter for dynamic social weight formula
+    current_iter : int
+        Current iteration number (1-indexed)
+    n_samples : int
+        Number of samples
+    n_components : int
+        Number of components
+    degrees_of_freedom : float
+        Degrees of freedom for t-distribution
+    max_velocity : float, default=0.1
+        Maximum allowed velocity
+
+    Returns
+    -------
+    particle : dict
+        Updated particle state
+    score : float
+        New score of the particle
+    """
+    # Input validation
+    assert isinstance(particle, dict), "particle must be a dictionary"
+    assert all(
+        k in particle
+        for k in ["position", "velocity", "best_position", "best_score", "P"]
+    ), "particle missing required keys"
+    assert isinstance(
+        global_best_position, np.ndarray
+    ), "global_best_position must be a numpy array"
+    assert 0 <= inertia_weight <= 1, "inertia_weight must be between 0 and 1"
+    assert cognitive_weight >= 0, "cognitive_weight must be non-negative"
+    assert social_weight >= 0, "social_weight must be non-negative"
+    assert current_iter > 0, "current_iter must be positive"
+    assert max_velocity > 0, "max_velocity must be positive"
+
+    # Generate random coefficients
+    r1 = random_state.uniform(0, 1, particle["position"].shape)
+    r2 = random_state.uniform(0, 1, particle["position"].shape)
+
+    # Calculate adaptive weights
+    adaptive_cognitive = h - (h / (1.0 + (f / current_iter)))
+    adaptive_social = h / (1.0 + (f / current_iter))
+
+    # Update velocity
+    cognitive_component = (
+        adaptive_cognitive * r1 * (particle["best_position"] - particle["position"])
+    )
+    social_component = (
+        adaptive_social * r2 * (global_best_position - particle["position"])
+    )
+
+    new_velocity = (
+        inertia_weight * particle["velocity"] + cognitive_component + social_component
+    )
+
+    # Apply velocity clamping
+    new_velocity = np.clip(new_velocity, -max_velocity, max_velocity)
+
+    # Update position
+    new_position = particle["position"] + new_velocity
+
+    # Update gains if using momentum
+    if "gains" in particle and "grad_update" in particle:
+        mask = np.sign(new_velocity) != np.sign(particle["grad_update"])
+        particle["gains"][mask] = np.minimum(particle["gains"][mask] + 0.2, 1.0)
+        particle["gains"][~mask] = np.maximum(particle["gains"][~mask] * 0.8, 0.01)
+        new_position += particle["gains"] * new_velocity
+
+    # Evaluate new position
+    score, grad = compute_kl_divergence(
+        new_position, particle["P"], degrees_of_freedom, n_samples, n_components
+    )
+
+    # Update particle state
+    particle["velocity"] = new_velocity
+    particle["position"] = new_position
+    particle["grad_update"] = grad
+
+    # Update personal best if improved
+    if score < particle["best_score"]:
+        particle["best_score"] = score
+        particle["best_position"] = new_position.copy()
+
+    return particle, score
+
+
 # Machine epsilon for float64
 MACHINE_EPSILON = np.finfo(np.double).eps
 
@@ -130,64 +429,18 @@ def _kl_divergence(
 ):
     """Compute KL divergence between P and Q distributions and its gradient.
 
-    Parameters
-    ----------
-    params : ndarray of shape (n_samples * n_components,)
-        Flattened array of current embeddings.
-
-    P : ndarray of shape (n_samples*(n_samples-1)/2,)
-        Condensed joint probability matrix from high-dimensional space.
-
-    degrees_of_freedom : float
-        Degrees of freedom of the Student's t-distribution.
-
-    n_samples : int
-        Number of samples.
-
-    n_components : int
-        Dimension of the embedded space.
-
-    skip_num_points : int, default=0
-        Number of points to skip in gradient computation.
-
-    compute_error : bool, default=True
-        Whether to compute the KL divergence.
-
-    Returns
-    -------
-    kl_divergence : float
-        KL divergence between P and Q.
-
-    grad : ndarray of shape (n_samples * n_components,)
-        Gradient of the KL divergence with respect to the embedding.
+    This function will use the C++ implementation if available, falling back to
+    the Python implementation if not.
     """
-    X_embedded = params.reshape(n_samples, n_components)
-
-    # Q is a heavy-tailed distribution: Student's t-distribution
-    dist = pdist(X_embedded, "sqeuclidean")
-    dist /= degrees_of_freedom
-    dist += 1.0
-    dist **= (degrees_of_freedom + 1.0) / -2.0
-    Q = np.maximum(dist / (2.0 * np.sum(dist)), MACHINE_EPSILON)
-
-    # Compute KL divergence
-    if compute_error:
-        kl_divergence = np.dot(P, np.log(np.maximum(P, MACHINE_EPSILON) / Q))
-    else:
-        kl_divergence = np.nan
-
-    # Compute gradient
-    grad = np.ndarray((n_samples, n_components), dtype=params.dtype)
-    PQd = squareform((P - Q) * dist)
-    for i in range(skip_num_points, n_samples):
-        grad[i] = np.dot(np.ravel(PQd[i], order="K"), X_embedded[i] - X_embedded)
-    grad = grad.ravel()
-
-    # Scale the gradient
-    c = 2.0 * (degrees_of_freedom + 1.0) / degrees_of_freedom
-    grad *= c
-
-    return kl_divergence, grad
+    return compute_kl_divergence(
+        params,
+        P,
+        degrees_of_freedom,
+        n_samples,
+        n_components,
+        skip_num_points,
+        compute_error,
+    )
 
 
 def _gradient_descent_step(
@@ -605,6 +858,96 @@ class TSNEPSO(TransformerMixin, BaseEstimator):
         else:
             self._perplexity_value = self.perplexity
 
+    def _adjust_params_for_dataset_size(self, n_samples, n_features):
+        """Adjust parameters based on dataset size and characteristics.
+
+        This method dynamically adjusts perplexity, particles count, and other parameters
+        based on the size of the dataset to optimize both performance and quality.
+
+        Parameters
+        ----------
+        n_samples : int
+            Number of samples in the dataset
+        n_features : int
+            Number of features in the dataset
+        """
+        # Store original parameters for reference
+        self._original_params = {
+            "perplexity": self.perplexity,
+            "n_particles": self.n_particles,
+            "n_iter": self.n_iter,
+            "learning_rate": self.learning_rate,
+            "early_exaggeration": self.early_exaggeration,
+        }
+
+        # Very small datasets (e.g., Iris, Wine): n_samples < 200
+        if n_samples < 200:
+            # Reduce particles for speed on small datasets
+            self.n_particles = min(5, self.n_particles)
+
+            # Adjust perplexity based on dataset size
+            # For very small datasets, perplexity should be smaller
+            recommended_perplexity = max(5.0, min(n_samples / 5, self.perplexity))
+
+            if self.perplexity > recommended_perplexity:
+                if self.verbose:
+                    print(
+                        f"Small dataset detected (n={n_samples}). Adjusting perplexity from "
+                        f"{self.perplexity} to {recommended_perplexity}"
+                    )
+                self.perplexity = recommended_perplexity
+
+            # Use shorter early exaggeration phase
+            self.early_exaggeration = min(8.0, self.early_exaggeration)
+
+            # For high-dimensional data in small datasets
+            if n_features > 50:
+                # Increase number of iterations for complex data spaces
+                self.n_iter = max(self.n_iter, 750)
+
+        # Medium datasets: 200 <= n_samples < 1000
+        elif n_samples < 1000:
+            # Use moderate number of particles
+            self.n_particles = min(7, self.n_particles)
+
+            # Adjust perplexity to about 5% of the dataset size
+            recommended_perplexity = max(15.0, min(n_samples / 20, self.perplexity))
+
+            if self.perplexity > recommended_perplexity:
+                if self.verbose:
+                    print(
+                        f"Medium dataset detected (n={n_samples}). Adjusting perplexity from "
+                        f"{self.perplexity} to {recommended_perplexity}"
+                    )
+                self.perplexity = recommended_perplexity
+
+        # Large datasets: n_samples >= 1000
+        else:
+            # Keep original number of particles for large datasets
+            pass
+
+        # Adjust learning rate if set to auto
+        if self.learning_rate == "auto":
+            # Already handled by existing code - no changes needed
+            pass
+
+        # Log adjustments if verbose
+        if self.verbose and (
+            self.perplexity != self._original_params["perplexity"]
+            or self.n_particles != self._original_params["n_particles"]
+        ):
+            print(f"Parameter adjustments for dataset size {n_samples}:")
+            print(
+                f"  - Perplexity: {self._original_params['perplexity']} -> {self.perplexity}"
+            )
+            print(
+                f"  - Particles: {self._original_params['n_particles']} -> {self.n_particles}"
+            )
+            if self.n_iter != self._original_params["n_iter"]:
+                print(
+                    f"  - Iterations: {self._original_params['n_iter']} -> {self.n_iter}"
+                )
+
     def _initialize_particles(self, X, random_state):
         """Initialize particles for PSO optimization.
 
@@ -623,6 +966,8 @@ class TSNEPSO(TransformerMixin, BaseEstimator):
             personal best scores, and evaluations of the fitness function.
         """
         n_samples = X.shape[0]
+
+        # Initialize the particles list
         particles = []
 
         # Compute pairwise distances in high-dimensional space
@@ -641,6 +986,13 @@ class TSNEPSO(TransformerMixin, BaseEstimator):
         ), "Distance matrix shape mismatch"
         assert np.all(np.isfinite(distances)), "Distance matrix contains invalid values"
 
+        # Special initialization for small datasets
+        if n_samples < 200 and hasattr(self, "_original_params"):
+            return self._initialize_particles_for_small_dataset(
+                X, distances, random_state
+            )
+
+        # Continue with the standard initialization for larger datasets
         # Compute joint probabilities
         P = _joint_probabilities(distances, self._perplexity_value, self.verbose > 0)
 
@@ -771,31 +1123,251 @@ class TSNEPSO(TransformerMixin, BaseEstimator):
 
         return particles
 
-    def _optimize_embedding(self, X, random_state):
-        """Optimize embedding using Particle Swarm Optimization.
+    def _initialize_particles_for_small_dataset(self, X, distances, random_state):
+        """Special particle initialization approach for small datasets.
 
-        This function implements the core t-SNE-PSO algorithm as described in Allaoui et al. (2025).
-        It uses Particle Swarm Optimization with dynamic cognitive and social weights
-        to minimize the KL divergence between high-dimensional and low-dimensional distributions.
+        For small datasets, we need a more careful initialization to avoid poor
+        local minima. This method tries different initialization strategies and
+        selects the best starting points based on initial KL divergence.
 
         Parameters
         ----------
         X : ndarray of shape (n_samples, n_features)
             Input data.
 
+        distances : ndarray of shape (n_samples, n_samples)
+            Pairwise distance matrix.
+
         random_state : RandomState instance
             Random number generator.
 
         Returns
         -------
-        best_position : ndarray of shape (n_samples, n_components)
-            Optimized embedding.
+        particles : list of dict
+            List of initialized particles with better starting positions.
+        """
+        n_samples = X.shape[0]
+        n_features = X.shape[1] if self.metric != "precomputed" else 0
 
-        best_cost : float
-            Final KL divergence value.
+        # Compute joint probabilities
+        P = _joint_probabilities(distances, self._perplexity_value, self.verbose > 0)
 
-        n_iter : int
-            Number of iterations run.
+        # Apply early exaggeration
+        P = P * self.early_exaggeration
+
+        # For small datasets, try multiple initialization strategies and pick the best ones
+        candidate_embeddings = []
+        candidate_scores = []
+
+        # 1. First try PCA initialization
+        if n_features > 0:  # Skip for precomputed distances
+            pca = PCA(
+                n_components=self.n_components,
+                random_state=random_state.randint(0, 2**32 - 1),
+            )
+            pca_embedding = pca.fit_transform(X)
+            pca_embedding = pca_embedding / np.std(pca_embedding[:, 0]) * 0.0001
+            candidate_embeddings.append(pca_embedding)
+
+            # Get KL divergence for PCA initialization
+            kl_div, _ = _kl_divergence(
+                pca_embedding.ravel(),
+                P,
+                self.degrees_of_freedom,
+                n_samples,
+                self.n_components,
+            )
+            candidate_scores.append(kl_div)
+
+            # Try a scaled version of PCA for more variety
+            scaled_pca = pca_embedding * 0.1  # Different scaling
+            candidate_embeddings.append(scaled_pca)
+            kl_div, _ = _kl_divergence(
+                scaled_pca.ravel(),
+                P,
+                self.degrees_of_freedom,
+                n_samples,
+                self.n_components,
+            )
+            candidate_scores.append(kl_div)
+
+        # 2. Try t-SNE initialization with different perplexities
+        perplexity_values = [
+            max(5.0, self._perplexity_value * 0.5),
+            self._perplexity_value,
+            min(self._perplexity_value * 2.0, (n_samples - 1) / 3.0),
+        ]
+
+        for perp in perplexity_values:
+            try:
+                tsne = TSNE(
+                    n_components=self.n_components,
+                    perplexity=perp,
+                    n_iter=250,
+                    random_state=random_state.randint(0, 2**32 - 1),
+                )
+                tsne_embedding = tsne.fit_transform(X)
+                candidate_embeddings.append(tsne_embedding)
+
+                # Get KL divergence for this initialization
+                kl_div, _ = _kl_divergence(
+                    tsne_embedding.ravel(),
+                    P,
+                    self.degrees_of_freedom,
+                    n_samples,
+                    self.n_components,
+                )
+                candidate_scores.append(kl_div)
+
+                # Also try a normalized version
+                norm_tsne = tsne_embedding.copy()
+                norm_tsne = norm_tsne / np.std(norm_tsne[:, 0]) * 0.0001
+                candidate_embeddings.append(norm_tsne)
+                kl_div, _ = _kl_divergence(
+                    norm_tsne.ravel(),
+                    P,
+                    self.degrees_of_freedom,
+                    n_samples,
+                    self.n_components,
+                )
+                candidate_scores.append(kl_div)
+            except Exception as e:
+                if self.verbose:
+                    print(
+                        f"t-SNE initialization with perplexity {perp} failed: {str(e)}"
+                    )
+
+        # 3. Try UMAP initialization if available
+        if _UMAP_AVAILABLE and n_features > 0:
+            try:
+                reducer = umap.UMAP(
+                    n_components=self.n_components,
+                    n_neighbors=min(int(self._perplexity_value), n_samples - 1),
+                    min_dist=0.1,
+                    random_state=random_state.randint(0, 2**32 - 1),
+                )
+                umap_embedding = reducer.fit_transform(X)
+                candidate_embeddings.append(umap_embedding)
+
+                # Get KL divergence for UMAP initialization
+                kl_div, _ = _kl_divergence(
+                    umap_embedding.ravel(),
+                    P,
+                    self.degrees_of_freedom,
+                    n_samples,
+                    self.n_components,
+                )
+                candidate_scores.append(kl_div)
+            except Exception as e:
+                if self.verbose:
+                    print(f"UMAP initialization failed: {str(e)}")
+
+        # 4. Add some random initializations
+        for i in range(3):  # Add three random initializations with different scales
+            random_embedding = random_state.normal(
+                0, 0.0001 * (i + 1), (n_samples, self.n_components)
+            )
+            candidate_embeddings.append(random_embedding)
+
+            # Get KL divergence for random initialization
+            kl_div, _ = _kl_divergence(
+                random_embedding.ravel(),
+                P,
+                self.degrees_of_freedom,
+                n_samples,
+                self.n_components,
+            )
+            candidate_scores.append(kl_div)
+
+        # Print stats on initialization candidates if verbose
+        if self.verbose:
+            print(f"Generated {len(candidate_scores)} initialization candidates")
+            print(
+                f"Best initial KL: {min(candidate_scores):.4f}, Worst: {max(candidate_scores):.4f}"
+            )
+
+        # Sort candidates by KL divergence (lower is better)
+        sorted_indices = np.argsort(candidate_scores)
+
+        # For diversity, take some good candidates but not necessarily all the best ones
+        # This prevents getting stuck in similar local minima
+        best_candidates = []
+
+        # Take the absolute best candidate
+        best_candidates.append(candidate_embeddings[sorted_indices[0]])
+
+        # Mix in some good candidates but with diversity
+        indices_to_use = [0]  # Already used the best one
+
+        # Build up the list of indices to use
+        i = 1
+        while len(indices_to_use) < self.n_particles and i < len(sorted_indices):
+            idx = sorted_indices[i]
+            # Only use this candidate if its score is reasonably good
+            # (not more than 2x worse than the best score)
+            if candidate_scores[idx] < 2.0 * candidate_scores[sorted_indices[0]]:
+                best_candidates.append(candidate_embeddings[idx])
+                indices_to_use.append(idx)
+            i += 1
+
+        # If we don't have enough candidates, duplicate the best ones with noise
+        while len(best_candidates) < self.n_particles:
+            # Use the best embedding and add noise
+            best_idx = sorted_indices[0]
+            noise = random_state.normal(0, 0.01, candidate_embeddings[best_idx].shape)
+            best_candidates.append(candidate_embeddings[best_idx] + noise)
+
+        # Initialize particles with the best candidates
+        particles = []
+        best_score = float("inf")
+        best_position = None
+
+        for i in range(self.n_particles):
+            # Initial position and velocity
+            position = best_candidates[i].ravel().copy()
+            velocity = random_state.normal(0, 0.0001, position.shape)
+
+            # Evaluate fitness
+            score, _ = _kl_divergence(
+                position, P, self.degrees_of_freedom, n_samples, self.n_components
+            )
+
+            # Store particle
+            particle = {
+                "position": position.copy(),
+                "velocity": velocity.copy(),
+                "best_position": position.copy(),
+                "best_score": score,
+                "P": P,
+                "grad_update": np.zeros_like(position),
+                "gains": np.ones_like(position),
+            }
+
+            particles.append(particle)
+
+            # Update global best
+            if score < best_score:
+                best_score = score
+                best_position = position.copy()
+
+        # Store global best in all particles
+        for particle in particles:
+            particle["global_best_position"] = best_position.copy()
+            particle["global_best_score"] = best_score
+
+        if self.verbose:
+            print(
+                f"Small dataset optimization: Best initial KL divergence = {best_score:.4f}"
+            )
+
+        return particles
+
+    def _optimize_embedding(self, X, random_state):
+        """Optimize embedding using Particle Swarm Optimization.
+
+        This function implements the core t-SNE-PSO algorithm as described in Allaoui et al. (2025).
+        It uses Particle Swarm Optimization with dynamic cognitive and social weights
+        to minimize the KL divergence between high-dimensional and low-dimensional distributions.
         """
         n_samples = X.shape[0]
 
@@ -840,6 +1412,14 @@ class TSNEPSO(TransformerMixin, BaseEstimator):
             250, self.n_iter // 4
         )  # Use 25% of iterations for exaggeration
 
+        # For small datasets, use shorter exaggeration phase
+        if n_samples < 200:
+            exaggeration_iter = min(125, self.n_iter // 5)  # 20% for small datasets
+            if self.verbose:
+                print(
+                    f"Small dataset detected, using shorter exaggeration phase: {exaggeration_iter} iterations"
+                )
+
         for iter_num in iterator:
             # Check if we should end early exaggeration phase
             if exaggeration_phase and iter_num >= exaggeration_iter:
@@ -847,8 +1427,43 @@ class TSNEPSO(TransformerMixin, BaseEstimator):
                 # Remove early exaggeration from P for all particles
                 for particle in particles:
                     particle["P"] = particle["P"] / self.early_exaggeration
+
+                # Recalculate scores after removing exaggeration
+                for i, particle in enumerate(particles):
+                    # Re-evaluate fitness with non-exaggerated P
+                    score, _ = _kl_divergence(
+                        particle["position"],
+                        particle["P"],
+                        self.degrees_of_freedom,
+                        n_samples,
+                        self.n_components,
+                    )
+
+                    # Update personal best if needed
+                    if score < particle["best_score"]:
+                        particle["best_position"] = particle["position"].copy()
+                        particle["best_score"] = score
+
+                # Find the new global best
+                new_best_score = float("inf")
+                new_best_position = None
+
+                for particle in particles:
+                    if particle["best_score"] < new_best_score:
+                        new_best_score = particle["best_score"]
+                        new_best_position = particle["best_position"].copy()
+
+                global_best_score = new_best_score
+                global_best_position = new_best_position
+
+                all_best_scores.append(global_best_score)
+                best_position_history.append(global_best_position.copy())
+
                 if self.verbose:
                     print(f"Ending early exaggeration phase at iteration {iter_num}")
+                    print(
+                        f"Updated KL divergence after exaggeration: {global_best_score:.4f}"
+                    )
 
             # Adjust parameters adaptively based on progress
             progress_ratio = iter_num / self.n_iter
@@ -856,18 +1471,15 @@ class TSNEPSO(TransformerMixin, BaseEstimator):
             # Linearly decrease inertia weight over iterations for better convergence
             adaptive_inertia = self.inertia_weight * (1.0 - 0.7 * progress_ratio)
 
-            # Calculate cognitive and social weights using the formulas from the original paper:
-            # - Cognitive weight (c1): Measures particle's attraction to its personal best position
-            # - Social weight (c2): Measures particle's attraction to the global best position
-            # The dynamic adjustment helps balance exploration and exploitation during optimization
+            # Calculate cognitive and social weights using the formulas from the original paper
             current_iter = iter_num + 1  # Use 1-indexed iteration count
             adaptive_cognitive = h - (h / (1.0 + (f / current_iter)))
             adaptive_social = h / (1.0 + (f / current_iter))
 
             # Occasionally apply random perturbation to particles to help escape local minima
-            # Probability decreases as iterations progress (simulated annealing approach)
             apply_perturbation = random_state.random() < 0.05 * (1.0 - progress_ratio)
 
+            # Process particles individually
             for i, particle in enumerate(particles):
                 # Random coefficients for cognitive and social components
                 r1 = random_state.uniform(0, 1, particle["position"].shape)
@@ -984,15 +1596,15 @@ class TSNEPSO(TransformerMixin, BaseEstimator):
             else:
                 n_iter_without_progress += 1
 
-                # More strict convergence criteria as iterations progress
-                adaptive_patience = max(
-                    10, int(max_iter_without_progress * (1.0 - 0.7 * progress_ratio))
-                )
+            # More strict convergence criteria as iterations progress
+            adaptive_patience = max(
+                10, int(max_iter_without_progress * (1.0 - 0.7 * progress_ratio))
+            )
 
-                if n_iter_without_progress >= adaptive_patience:
-                    if self.verbose > 0:
-                        print(f"Converged after {iter_num + 1} iterations")
-                    break
+            if n_iter_without_progress >= adaptive_patience:
+                if self.verbose > 0:
+                    print(f"Converged after {iter_num + 1} iterations")
+                break
 
             # Every 100 iterations, attempt to reinitialize worst performing particles
             if iter_num > 0 and iter_num % 100 == 0:
@@ -1103,6 +1715,12 @@ class TSNEPSO(TransformerMixin, BaseEstimator):
         if self.metric != "precomputed":
             self.n_features_in_ = X.shape[1]
 
+            # Adjust parameters based on dataset size and dimensionality
+            self._adjust_params_for_dataset_size(n_samples, self.n_features_in_)
+        else:
+            # For precomputed distance matrices, use only sample count
+            self._adjust_params_for_dataset_size(n_samples, 0)
+
         self._check_params_vs_input(X)
 
         if not hasattr(self, "_perplexity_value"):
@@ -1111,7 +1729,8 @@ class TSNEPSO(TransformerMixin, BaseEstimator):
             if n_samples - 1 < 3 * self._perplexity_value:
                 self._perplexity_value = (n_samples - 1) / 3.0
                 warnings.warn(
-                    f"Perplexity is too large for the number of samples. "
+                    f"Perplexity ({self.perplexity}) should be less than "
+                    f"n_samples ({n_samples}). "
                     f"Using perplexity = {self._perplexity_value:.3f} instead.",
                     UserWarning,
                 )

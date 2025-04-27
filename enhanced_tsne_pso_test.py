@@ -46,9 +46,9 @@ def run_comparison(dataset_name, X, y, perplexity=30.0, n_iter=500):
     results : dict
         Dictionary containing results and timing information.
     """
-    print(f"\n{'='*50}")
+    print(f"\n{'=' * 50}")
     print(f"Dataset: {dataset_name} | Shape: {X.shape} | Classes: {len(np.unique(y))}")
-    print(f"{'='*50}")
+    print(f"{'=' * 50}")
 
     # Scale the data
     X_scaled = StandardScaler().fit_transform(X)
@@ -193,7 +193,8 @@ def main():
     # Compare all results
     print("\nSummary of results:")
     print(
-        f"{'Dataset':<20} {'TSNE-PSO KL':<15} {'Standard KL':<15} {'Improvement':<15} {'TSNE-PSO Time':<15} {'Standard Time':<15}"
+        f"{'Dataset':<20} {'TSNE-PSO KL':<15} {'Standard KL':<15} "
+        f"{'Improvement':<15} {'TSNE-PSO Time':<15} {'Standard Time':<15}"
     )
     print("-" * 100)
 

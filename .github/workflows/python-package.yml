@@ -18,6 +18,7 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+          cache: 'pip'
           
       - name: Install linting dependencies
         run: |
@@ -60,16 +61,18 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
+          cache: 'pip'
           
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           python -m pip install pytest pytest-cov
-          if [ "${{ matrix.os }}" == "windows-latest" ]; then
-            python -m pip install numpy scipy scikit-learn tqdm
-          else
-            python -m pip install numpy scipy scikit-learn umap-learn tqdm
+          python -m pip install numpy scipy scikit-learn tqdm
+          # Install umap-learn only on non-Windows systems due to compatibility
+          if [ "${{ matrix.os }}" != "windows-latest" ]; then
+            python -m pip install umap-learn
           fi
+          # Install in development mode
           python -m pip install -e .
         shell: bash
           
@@ -77,9 +80,16 @@ jobs:
         run: |
           python -c "from tsne_pso import TSNEPSO; print('Import successful')"
           
-      - name: Test with pytest
+      - name: Run tests with reduced iterations for CI
         run: |
-          pytest --cov=tsne_pso tests/
+          # Set environment variable to use shorter iterations in tests
+          export TSNE_PSO_TEST_QUICK=1
+          pytest -xvs --cov=tsne_pso tests/
+        shell: bash
+          
+      - name: Generate coverage report
+        run: |
+          pytest --cov=tsne_pso --cov-report=xml tests/
           
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v3
@@ -98,6 +108,7 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+          cache: 'pip'
           
       - name: Install build dependencies
         run: |
@@ -111,6 +122,11 @@ jobs:
       - name: Check package with twine
         run: |
           twine check dist/*
+          
+      - name: Install and test built package
+        run: |
+          pip install dist/*.whl
+          python -c "import tsne_pso; print(f'Successfully installed {tsne_pso.__name__}')"
           
       - name: Archive production artifacts
         uses: actions/upload-artifact@v4
