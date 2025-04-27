@@ -1837,10 +1837,8 @@ class TSNEPSO(TransformerMixin, BaseEstimator):
                                 )
                             else:
                                 logger.info(
-                                f"Iteration {iter_num}: New best score = {score:.4f}"
-                            )
-
-                            
+                                    f"Iteration {iter_num}: New best score = {score:.4f}"
+                                )
 
                         # Reset progress counter
                         n_iter_without_progress = 0
