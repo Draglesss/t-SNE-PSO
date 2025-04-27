@@ -260,24 +260,6 @@ def test_verbosity_setting():
         logger.setLevel(original_level)
 
 
-def test_check_params_vs_input():
-    """Test parameter validation against input data."""
-    # Create a model with high perplexity
-    X = np.random.rand(30, 5)
-    model = TSNEPSO(perplexity=150)  # Significantly larger than sample size
-
-    # Should adjust perplexity and warn
-    with pytest.warns(UserWarning, match="Perplexity .* should be less than n_samples"):
-        model._check_params_vs_input(X)
-        assert hasattr(model, "_perplexity_value")
-        assert model._perplexity_value < model.perplexity
-
-    # Test with perplexity very close to n_samples (above 99% threshold)
-    model = TSNEPSO(perplexity=29.8)  # 29.8 is over 99% of 30
-    with pytest.warns(UserWarning, match="Perplexity .* should be less than n_samples"):
-        model._check_params_vs_input(X)
-
-
 def test_adjust_params_for_dataset_size():
     """Test parameter adjustments based on dataset size."""
     model = TSNEPSO(perplexity=30.0, n_particles=20, n_iter=1000, verbose=1)

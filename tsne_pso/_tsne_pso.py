@@ -13,8 +13,10 @@
 # t-SNE-PSO: Optimizing t-SNE using particle swarm optimization.
 # Expert Systems with Applications, 269, 126398.
 
+import logging
 import warnings
 from numbers import Integral, Real
+from typing import Dict, Tuple
 
 import numpy as np
 from scipy.spatial.distance import pdist, squareform
@@ -40,17 +42,17 @@ try:
 except ImportError:
     _TQDM_AVAILABLE = False
 
-"""Core implementation of t-SNE PSO optimization in pure Python.
+from .logging_config import get_logger, setup_logging
 
-This module provides the core computational functions for t-SNE with PSO optimization.
-All functions are implemented in pure Python with NumPy for numerical operations.
+# Initialize logger
+logger = get_logger(__name__)
+
+"""Core implementation of t-SNE PSO optimization.
+
+This module provides the computational functions for t-SNE with PSO optimization.
+All functions are implemented with NumPy for numerical operations, focusing on
+numerical stability and performance.
 """
-
-import warnings
-from typing import Dict, Tuple
-
-import numpy as np
-from scipy.spatial.distance import pdist, squareform
 
 # Define exports
 __all__ = [
@@ -68,21 +70,40 @@ MIN_VAL = np.finfo(float).min
 def compute_joint_probabilities(
     distances: np.ndarray, perplexity: float, verbose: bool = False
 ) -> np.ndarray:
-    """Compute joint probabilities P_ij from distances using binary search.
+    """Calculate joint probability distributions P_ij from pairwise distances.
+
+    This function implements a robust binary search algorithm to find optimal
+    conditional probabilities (P_j|i) with the desired perplexity. It then
+    computes symmetric joint probabilities P_ij for the high-dimensional
+    data distribution.
+
+    The perplexity parameter effectively controls the balance between preserving
+    local and global structure. Higher perplexity values consider more neighbors,
+    while lower values focus on more local relationships.
 
     Parameters
     ----------
     distances : array of shape (n_samples, n_samples)
-        Pairwise distances between samples
+        Square matrix of pairwise Euclidean distances between data points
     perplexity : float
-        Desired perplexity of the joint probability distributions
+        Desired perplexity value, typically between 5 and 50. Controls the
+        effective number of neighbors considered for each point.
     verbose : bool, default=False
-        Whether to print progress messages
+        Whether to display progress information during computation
 
     Returns
     -------
     P : array of shape (n_samples * (n_samples-1) / 2,)
-        Condensed joint probability matrix
+        Condensed symmetric joint probability matrix in upper triangular form
+
+    Notes
+    -----
+    The algorithm performs a binary search to find precision values (beta) that
+    yield the desired perplexity for each point. This ensures a consistent
+    neighborhood size across the dataset regardless of local density variations.
+
+    Numerical stability is ensured by applying proper minimum bounds to prevent
+    underflow issues during exponential calculations.
     """
     # Input validation
     assert isinstance(distances, np.ndarray), "distances must be a numpy array"
@@ -101,7 +122,7 @@ def compute_joint_probabilities(
     for i in range(n_samples):
         # Print progress
         if verbose and i % 1000 == 0:
-            print(f"Computing P-values for point {i}/{n_samples}")
+            logger.info(f"Computing P-values for point {i}/{n_samples}")
 
         # Compute P-values using binary search
         betamin = -np.inf
@@ -119,7 +140,7 @@ def compute_joint_probabilities(
             Pi = Pi / sumPi
 
             # Calculate entropy and difference from target
-            entropy = float(-np.sum(Pi * np.log2(np.maximum(Pi, MACHINE_EPSILON))))
+            entropy = float(np.sum(-Pi * np.log2(np.maximum(Pi, MACHINE_EPSILON))))
             entropyDiff = float(entropy - logU)
 
             if abs(entropyDiff) < 1e-5:
@@ -162,29 +183,53 @@ def compute_kl_divergence(
     skip_num_points: int = 0,
     compute_error: bool = True,
 ) -> Tuple[float, np.ndarray]:
-    """Compute KL divergence and its gradient for t-SNE optimization.
+    """Compute Kullback-Leibler divergence and its gradient for t-SNE optimization.
+
+    This function computes the KL divergence between the joint probability
+    distributions P (high-dimensional) and Q (low-dimensional), as well as
+    the gradient of the KL divergence with respect to the embedding coordinates.
+
+    The KL divergence serves as the cost function for t-SNE, measuring how well
+    the low-dimensional embedding preserves the high-dimensional structure.
+    The gradient provides the direction for adjusting the embedding to minimize
+    this cost function.
 
     Parameters
     ----------
     params : array of shape (n_samples * n_components,)
-        Current embedding flattened into 1D
+        Current embedding coordinates flattened into 1D array
     P : array of shape (n_samples * (n_samples-1) / 2,)
-        Condensed joint probability matrix P
+        Condensed joint probability matrix from high-dimensional space
     degrees_of_freedom : float
-        Degrees of freedom of Student's t-distribution
+        Degrees of freedom of Student's t-distribution; controls
+        the heaviness of the tails in the low-dimensional distribution
     n_samples : int
-        Number of samples
+        Number of samples in the dataset
     n_components : int
-        Number of components in embedding
+        Number of components in the embedding
+    skip_num_points : int, default=0
+        Number of points to skip when computing gradient; useful for
+        mini-batch optimization approaches
     compute_error : bool, default=True
-        Whether to compute KL divergence error
+        Whether to compute and return the KL divergence value
 
     Returns
     -------
     kl_divergence : float
-        KL divergence between P and Q distributions
+        KL divergence between P and Q distributions (if compute_error=True)
+        Otherwise returns NaN
     grad : array of shape (n_samples * n_components,)
-        Gradient of KL divergence with respect to embedding
+        Gradient of KL divergence with respect to the embedding coordinates
+
+    Notes
+    -----
+    The Student's t-distribution is used for the low-dimensional space to
+    address the "crowding problem" by allowing moderately distant points in
+    the original space to be modeled by points that are further apart in
+    the embedding space.
+
+    The implementation uses vectorized operations for efficiency. The gradient
+    computation is carefully implemented to handle numerical stability issues.
     """
     # Input validation
     # Original Python implementation as fallback
@@ -233,45 +278,73 @@ def update_particle_pso(
     degrees_of_freedom: float,
     max_velocity: float = 0.1,
 ) -> Tuple[Dict, float]:
-    """Update particle position and velocity using PSO rules.
+    """Update particle position and velocity using Particle Swarm Optimization rules.
+
+    This function implements the core PSO update algorithm with dynamic weighting
+    coefficients. Each particle's movement is influenced by three components:
+
+    1. Inertia: Tendency to continue moving in the current direction
+    2. Cognitive: Attraction to the particle's own best position
+    3. Social: Attraction to the swarm's global best position
+
+    The dynamic weighting scheme (using parameters h and f) allows the algorithm
+    to transition from exploration (higher cognitive weight) to exploitation
+    (higher social weight) as iterations progress.
 
     Parameters
     ----------
     particle : dict
-        Particle state dictionary containing position, velocity, etc.
+        Dictionary containing particle state information including:
+        - position: Current coordinates in the embedding space
+        - velocity: Current movement vector
+        - best_position: Best position found by this particle
+        - best_score: Best score achieved by this particle
+        - P: Joint probability matrix for this particle
+        - grad_update: Previous gradient update (for hybrid approach)
+        - gains: Adaptive gains for each dimension (for hybrid approach)
     global_best_position : array
-        Global best position found so far
+        Global best position found by any particle in the swarm
     global_best_score : float
-        Global best score found so far
+        Global best score (lowest KL divergence) found so far
     inertia_weight : float
-        PSO inertia weight parameter
+        Weight controlling influence of previous velocity (0-1)
     cognitive_weight : float
-        PSO cognitive weight parameter
+        Base weight for cognitive component (attraction to personal best)
     social_weight : float
-        PSO social weight parameter
+        Base weight for social component (attraction to global best)
     random_state : RandomState
-        Random number generator
+        NumPy random number generator for reproducibility
     h : float
-        Parameter for dynamic cognitive weight formula
+        Parameter controlling the overall magnitude of cognitive and social weights
     f : float
-        Parameter for dynamic social weight formula
+        Parameter controlling the balance between exploration and exploitation
     current_iter : int
         Current iteration number (1-indexed)
     n_samples : int
-        Number of samples
+        Number of samples in the dataset
     n_components : int
-        Number of components
+        Number of dimensions in the embedding
     degrees_of_freedom : float
-        Degrees of freedom for t-distribution
+        Degrees of freedom parameter for the t-distribution
     max_velocity : float, default=0.1
-        Maximum allowed velocity
+        Maximum allowed velocity magnitude for any dimension
 
     Returns
     -------
     particle : dict
-        Updated particle state
+        Updated particle state with new position, velocity, and score
     score : float
-        New score of the particle
+        New KL divergence score of the particle at its updated position
+
+    Notes
+    -----
+    The dynamic weighting scheme follows the formulation proposed in the
+    original t-SNE-PSO paper by Allaoui et al. (2025). The cognitive weight
+    decreases while the social weight increases with iterations, encouraging
+    convergence to the global optimum.
+
+    Velocity clamping is applied to prevent explosive particle movement,
+    which could destabilize the optimization process.
     """
     # Input validation
     assert isinstance(particle, dict), "particle must be a dictionary"
@@ -374,27 +447,43 @@ _VALID_METRICS = [
 def _joint_probabilities(distances, perplexity, verbose=False):
     """Convert distances to joint probabilities P_ij.
 
-    This function calculates the joint probabilities based on pairwise distances,
-    implementing the approach described in the original t-SNE paper by van der Maaten
-    and Hinton (2008) and adapted for t-SNE-PSO by Allaoui et al. (2025).
+    This function calculates joint probabilities using a Gaussian kernel in the
+    high-dimensional space. It employs an efficient binary search algorithm to find
+    the optimal bandwidth (precision) for each point that achieves the desired
+    perplexity value.
+
+    The perplexity can be interpreted as a smooth measure of the effective number
+    of neighbors for each point. The function ensures that the distribution has
+    approximately the same entropy (uncertainty) for each point, regardless of
+    the local density of the data.
 
     Parameters
     ----------
     distances : ndarray of shape (n_samples, n_samples)
-        Pairwise distance matrix.
+        Pairwise distance matrix between data points.
 
     perplexity : float
-        Perplexity parameter (related to the number of nearest neighbors).
-        Larger datasets usually require a larger perplexity. Consider
-        selecting a value between 5 and 50.
+        Perplexity parameter that controls the effective number of neighbors.
+        Typical values range between 5 and 50, with larger datasets generally
+        requiring higher perplexity values.
 
     verbose : bool, default=False
-        Whether to print progress messages.
+        Whether to display progress information during computation.
 
     Returns
     -------
     P : ndarray of shape (n_samples*(n_samples-1)/2,)
-        Condensed joint probability matrix.
+        Condensed joint probability matrix in upper triangular form.
+
+    Notes
+    -----
+    This implementation leverages scikit-learn's efficient binary search algorithm
+    for finding the optimal precision values. The resulting conditional probabilities
+    are symmetrized to obtain joint probabilities, following the approach in the
+    original t-SNE paper.
+
+    Numerical stability is ensured by applying proper minimum bounds to prevent
+    underflow issues during normalization.
     """
     # Ensure distances are in the correct format
     distances = distances.astype(np.float32, copy=False)
@@ -429,8 +518,48 @@ def _kl_divergence(
 ):
     """Compute KL divergence between P and Q distributions and its gradient.
 
-    This function will use the C++ implementation if available, falling back to
-    the Python implementation if not.
+    This function calculates the Kullback-Leibler divergence between the joint
+    probability distributions in high-dimensional space (P) and low-dimensional
+    space (Q), as well as the gradient of this divergence with respect to the
+    embedding coordinates.
+
+    This is a wrapper function that calls the optimized implementation while
+    providing a consistent interface. It supports skipping points for mini-batch
+    approaches and conditional computation of the error term for efficiency.
+
+    Parameters
+    ----------
+    params : ndarray of shape (n_samples * n_components,)
+        Current embedding coordinates flattened into 1D array.
+
+    P : ndarray of shape (n_samples*(n_samples-1)/2,)
+        Condensed joint probability matrix from high-dimensional space.
+
+    degrees_of_freedom : float
+        Degrees of freedom for the Student's t-distribution used in the
+        low-dimensional space.
+
+    n_samples : int
+        Number of samples in the dataset.
+
+    n_components : int
+        Number of dimensions in the embedding.
+
+    skip_num_points : int, default=0
+        Number of points to skip when computing gradient, enabling mini-batch
+        optimization approaches.
+
+    compute_error : bool, default=True
+        Whether to compute and return the KL divergence value or just the gradient.
+
+    Returns
+    -------
+    kl_divergence : float
+        KL divergence between P and Q distributions if compute_error=True,
+        otherwise NaN.
+
+    grad : ndarray of shape (n_samples * n_components,)
+        Gradient of KL divergence with respect to the embedding coordinates.
     """
     return compute_kl_divergence(
         params,
@@ -457,51 +586,70 @@ def _gradient_descent_step(
 ):
     """Perform one step of gradient descent with momentum and adaptive gains.
 
+    This function implements the gradient descent update used in the hybrid approach
+    of t-SNE-PSO. It incorporates momentum and adaptive gains to improve convergence,
+    helping to overcome local minima and saddle points.
+
+    The adaptive gains approach increases the effective learning rate in directions
+    where the gradient consistently points in the same direction, while decreasing it
+    in directions where the gradient oscillates.
+
     Parameters
     ----------
     params : ndarray of shape (n_samples * n_components,)
-        Flattened array of current embeddings.
+        Current embedding coordinates flattened into 1D array.
 
     P : ndarray of shape (n_samples*(n_samples-1)/2,)
         Condensed joint probability matrix from high-dimensional space.
 
     degrees_of_freedom : float
-        Degrees of freedom of the Student's t-distribution.
+        Degrees of freedom for the Student's t-distribution used in
+        low-dimensional space.
 
     n_samples : int
-        Number of samples.
+        Number of samples in the dataset.
 
     n_components : int
-        Dimension of the embedded space.
+        Number of dimensions in the embedding.
 
     momentum : float, default=0.8
-        Momentum for gradient descent.
+        Momentum coefficient for gradient updates, controlling the influence
+        of previous update directions.
 
     learning_rate : float, default=200.0
-        Learning rate for gradient descent.
+        Base learning rate for gradient updates.
 
     min_gain : float, default=0.01
-        Minimum gain for gradient descent.
+        Minimum gain value to ensure continued learning in all dimensions.
 
     update : ndarray of shape (n_samples * n_components,), default=None
-        Previous update for momentum calculation.
+        Previous update vector for momentum calculation. If None, initialized
+        to zeros.
 
     gains : ndarray of shape (n_samples * n_components,), default=None
-        Previous gains for adaptive learning rates.
+        Previous gain values for adaptive learning rates. If None, initialized
+        to ones.
 
     Returns
     -------
     params : ndarray of shape (n_samples * n_components,)
-        Updated embeddings.
+        Updated embedding coordinates.
 
     error : float
-        KL divergence between P and Q.
+        KL divergence between P and Q distributions after the update.
 
     update : ndarray of shape (n_samples * n_components,)
-        Updated gradients.
+        Updated momentum vector.
 
     gains : ndarray of shape (n_samples * n_components,)
-        Updated gains.
+        Updated gain values for adaptive learning rates.
+
+    Notes
+    -----
+    The adaptive gains approach was introduced in the original t-SNE paper.
+    It increases the learning rate in dimensions where the gradient is consistent
+    across iterations, and decreases it where the gradient oscillates, helping
+    to navigate ravines in the error surface.
     """
     # Initialize update and gains if not provided
     if update is None:
@@ -532,151 +680,138 @@ def _gradient_descent_step(
 
 
 class TSNEPSO(TransformerMixin, BaseEstimator):
-    """t-SNE with Particle Swarm Optimization.
+    """t-SNE with Particle Swarm Optimization for high-quality dimensionality reduction.
 
-    t-Distributed Stochastic Neighbor Embedding (t-SNE) with Particle Swarm
-    Optimization (PSO) for the optimization step instead of gradient descent.
-    This approach can be more effective at avoiding local minima and often
-    produces embeddings with better cluster separation.
+    t-Distributed Stochastic Neighbor Embedding (t-SNE) is a powerful technique
+    for visualizing high-dimensional data in lower dimensions. This implementation
+    enhances the standard t-SNE algorithm by replacing gradient descent with
+    Particle Swarm Optimization (PSO), providing several advantages:
 
-    This implementation is based on the paper:
-    Allaoui, M., Belhaouari, S. B., Hedjam, R., Bouanane, K., & Kherfi, M. L. (2025).
-    "t-SNE-PSO: Optimizing t-SNE using particle swarm optimization."
-    Expert Systems with Applications, 269, 126398.
+    1. Better exploration of the embedding space
+    2. Improved ability to escape local minima
+    3. More consistent cluster separation
+    4. Enhanced preservation of global structure
+
+    The algorithm combines swarm intelligence principles with the t-SNE objective
+    function. Multiple particles explore the embedding space simultaneously, sharing
+    information about the best configurations found. The optimization process uses
+    dynamic cognitive and social weights that transition from exploration to
+    exploitation as iterations progress.
+
+    This implementation supports a hybrid mode that combines PSO with gradient
+    descent steps for improved convergence, as well as multiple initialization
+    strategies to provide better starting points.
 
     Parameters
     ----------
     n_components : int, default=2
-        Dimension of the embedded space.
+        Dimension of the embedded space, typically 2 or 3 for visualization.
 
     perplexity : float, default=30.0
-        The perplexity is related to the number of nearest neighbors used.
-        Larger datasets usually require a larger perplexity. Consider
-        selecting a value between 5 and 50.
+        Perplexity parameter that balances attention between local and global
+        aspects of the data. It can be interpreted as a smooth measure of the
+        effective number of neighbors. Larger datasets generally require larger
+        perplexity values (5-50).
 
     early_exaggeration : float, default=12.0
-        Controls how tight natural clusters in the original space are in
-        the embedded space. Larger values ensure more widely separated
-        embedding clusters. Only used during the early exaggeration phase.
+        Coefficient for early exaggeration phase, which increases the attraction
+        between similar points to form more separated clusters initially.
 
     learning_rate : float or "auto", default="auto"
-        The learning rate for t-SNE optimization. If "auto", the learning
-        rate is set to max(N / early_exaggeration / 4, 50) where N is the
-        sample size. Only used during gradient descent steps in the hybrid
-        PSO approach.
+        Learning rate for gradient descent steps in the hybrid approach. If "auto",
+        it's set to max(N / early_exaggeration / 4, 50) where N is the sample size.
 
     n_iter : int, default=1000
         Maximum number of iterations for optimization.
 
     n_particles : int, default=10
-        Number of particles for PSO optimization. Larger values can provide
-        better exploration at the cost of computational efficiency.
+        Number of particles in the PSO swarm. More particles provide better
+        exploration at the cost of computational efficiency.
 
     inertia_weight : float, default=0.5
-        Inertia weight for PSO. Controls how much of the previous velocity
-        is preserved. Values closer to 0 accelerate convergence, while values
-        closer to 1 encourage exploration.
+        Controls how much of each particle's previous velocity is preserved.
+        Values closer to 0 accelerate convergence, while values closer to 1
+        encourage exploration.
 
     cognitive_weight : float, default=1.0
-        Cognitive weight for PSO. Controls how much particles are influenced
-        by their personal best position.
+        Base weight for the cognitive component, controlling how much particles
+        are attracted to their personal best positions.
 
     social_weight : float, default=1.0
-        Social weight for PSO. Controls how much particles are influenced
-        by the global best position.
+        Base weight for the social component, controlling how much particles
+        are attracted to the global best position.
 
     use_hybrid : bool, default=True
-        Whether to use hybrid PSO with gradient descent steps. When True,
-        alternates between PSO updates and gradient descent steps for
-        improved convergence.
+        Whether to use the hybrid approach combining PSO with gradient descent
+        steps. This often improves convergence and final embedding quality.
 
     degrees_of_freedom : float, default=1.0
         Degrees of freedom of the Student's t-distribution. Lower values
-        emphasize the separation between clusters.
+        increase the heavy-tailed nature of the distribution, emphasizing
+        the separation between distant clusters.
 
     init : str or ndarray of shape (n_samples, n_components), default='pca'
-        Initialization method. Valid options are:
+        Initialization method for the embedding. Options include:
         - 'pca': Principal Component Analysis initialization
         - 'tsne': Initialization from a standard t-SNE run
         - 'umap': Initialization from UMAP (if available)
         - 'random': Random initialization
-        - ndarray: ndarray of shape (n_samples, n_components) to use for initialization
+        - ndarray: Custom initialization provided as an array
 
     verbose : int, default=0
-        Verbosity level. If greater than 0, progress messages are printed.
+        Verbosity level for logging and progress information.
 
     random_state : int, RandomState instance or None, default=None
-        Determines the random number generator for initialization.
+        Controls the randomness of the initialization and optimization.
         Pass an int for reproducible results across multiple function calls.
 
     method : str, default='pso'
-        Method to use for optimization. Currently only 'pso' is supported.
+        Optimization method. Currently only 'pso' is supported.
 
     angle : float, default=0.5
-        Only used if method='barnes_hut'. This is the trade-off between speed
-        and accuracy for Barnes-Hut T-SNE. 'angle' is the angular size (referred
-        to as theta in [3]) of a distant node as measured from a point.
+        Only used if method='barnes_hut' (reserved for future implementation).
+        This is the trade-off between speed and accuracy for Barnes-Hut t-SNE.
 
     n_jobs : int, default=None
-        The number of parallel jobs to run for computation. -1 means using all
-        processors. Currently not used (placeholder for future implementation).
+        Number of parallel jobs for computation (reserved for future implementation).
 
     metric : str or callable, default='euclidean'
-        The metric to use when calculating distance between instances in a
-        feature array. If metric is a string, it must be one of the options
-        allowed by scipy.spatial.distance.pdist for its metric parameter, or
-        a metric listed in pairwise.PAIRWISE_DISTANCE_FUNCTIONS.
-        If metric is "precomputed", X is assumed to be a distance matrix.
-        Alternatively, if metric is a callable function, it is called on each
-        pair of instances (rows) and the resulting value recorded. The callable
-        should take two arrays from X as input and return a value indicating
-        the distance between them. The default is "euclidean" which is
-        interpreted as squared euclidean distance.
+        Distance metric for calculating pairwise distances in the original space.
+        Can be any metric supported by scipy.spatial.distance.pdist, or a callable
+        function that takes two arrays and returns a distance value.
+        If 'precomputed', X is interpreted as a distance matrix.
 
     metric_params : dict, default=None
-        Additional keyword arguments for the metric function.
+        Additional parameters for the metric function.
 
     h : float, default=1e-20
         Parameter for dynamic cognitive weight formula: c1 = h - (h / (1 + (f / it))).
-        Controls the balance between exploration and exploitation during optimization.
-        Used in the original t-SNE-PSO paper.
+        Controls how cognitive weight decreases over iterations.
 
     f : float, default=1e-21
         Parameter for dynamic social weight formula: c2 = h / (1 + (f / it)).
-        Controls the balance between exploration and exploitation during optimization.
-        Used in the original t-SNE-PSO paper.
+        Controls how social weight increases over iterations.
 
     Attributes
     ----------
     embedding_ : ndarray of shape (n_samples, n_components)
-        Stores the embedding vectors.
+        Stores the optimized embedding coordinates.
 
     kl_divergence_ : float
-        Final KL divergence value (cost function).
+        Final KL divergence value (cost function) of the embedding.
 
     n_iter_ : int
-        Number of iterations run.
+        Actual number of iterations run before convergence or maximum iterations.
 
     n_features_in_ : int
-        Number of features seen during :term:`fit`.
+        Number of features in the input data.
 
     feature_names_in_ : ndarray of shape (`n_features_in_`,)
-        Names of features seen during :term:`fit`. Defined only when `X`
-        has feature names that are all strings.
+        Names of features seen during fit (if available).
 
-    References
-    ----------
-    .. [1] van der Maaten, L.J.P. and Hinton, G.E., 2008. "Visualizing
-       High-Dimensional Data Using t-SNE." Journal of Machine Learning
-       Research, 9(Nov), pp.2579-2605.
-
-    .. [2] Kennedy, J. and Eberhart, R., 1995. "Particle swarm optimization."
-       In Proceedings of ICNN'95 - International Conference on Neural Networks,
-       Vol. 4, pp. 1942-1948.
-
-    .. [3] Shi, Y. and Eberhart, R., 1998. "A modified particle swarm
-       optimizer." In 1998 IEEE International Conference on Evolutionary
-       Computation Proceedings, pp. 69-73.
+    convergence_history_ : ndarray
+        History of best KL divergence values across iterations (if optimization
+        completes successfully).
 
     Examples
     --------
@@ -687,6 +822,32 @@ class TSNEPSO(TransformerMixin, BaseEstimator):
     >>> Y = model.fit_transform(X)
     >>> Y.shape
     (4, 2)
+
+    Notes
+    -----
+    The t-SNE-PSO algorithm is particularly effective for datasets with complex
+    structure where standard t-SNE might get trapped in poor local minima. The
+    implementation automatically adjusts parameters based on dataset size for
+    optimal performance.
+
+    For best results with larger datasets, consider increasing both the number of
+    particles and iterations, though this will increase computation time. The
+    perplexity parameter should typically scale with dataset size - larger
+    datasets benefit from higher perplexity values.
+
+    References
+    ----------
+    .. [1] van der Maaten, L.J.P. and Hinton, G.E., 2008. "Visualizing
+       High-Dimensional Data Using t-SNE." Journal of Machine Learning
+       Research, 9(Nov), pp.2579-2605.
+
+    .. [2] Allaoui, M., Belhaouari, S. B., Hedjam, R., Bouanane, K., & Kherfi, M. L. (2025).
+       "t-SNE-PSO: Optimizing t-SNE using particle swarm optimization."
+       Expert Systems with Applications, 269, 126398.
+
+    .. [3] Kennedy, J. and Eberhart, R., 1995. "Particle swarm optimization."
+       In Proceedings of ICNN'95 - International Conference on Neural Networks,
+       Vol. 4, pp. 1942-1948.
     """
 
     # Define class tags to indicate behavior
@@ -753,8 +914,8 @@ class TSNEPSO(TransformerMixin, BaseEstimator):
         "n_jobs": [None, Integral],
         "metric": [StrOptions(set(_VALID_METRICS) | {"precomputed"}), callable],
         "metric_params": [dict, None],
-        "h": [Interval(Real, 0, None, closed="left")],
-        "f": [Interval(Real, 0, None, closed="left")],
+        "h": [Interval(Real, 1e-21, None, closed="left")],
+        "f": [Interval(Real, 1e-21, None, closed="left")],
     }
 
     def __init__(
@@ -781,6 +942,14 @@ class TSNEPSO(TransformerMixin, BaseEstimator):
         h=1e-20,
         f=1e-21,
     ):
+        """Initialize the TSNEPSO model with the specified parameters.
+
+        All parameters are stored as instance attributes and validated during the
+        fitting process. Several parameters are automatically adjusted based on
+        the dataset characteristics to ensure optimal performance.
+
+        See class documentation for detailed parameter descriptions.
+        """
         self.n_components = n_components
         self.perplexity = perplexity
         self.early_exaggeration = early_exaggeration
@@ -800,16 +969,20 @@ class TSNEPSO(TransformerMixin, BaseEstimator):
         self.n_jobs = n_jobs
         self.metric = metric
         self.metric_params = metric_params
-        self.h = h  # Parameter for dynamic cognitive weight formula
-        self.f = f  # Parameter for dynamic social weight formula
+        self.h = h
+        self.f = f
 
     def _validate_parameters(self):
-        """Validate input parameters.
+        """Validate input parameters for consistency and correctness.
+
+        This method checks that all parameters are within their valid ranges
+        and compatible with each other. It raises descriptive error messages
+        when invalid parameters are detected.
 
         Raises
         ------
         ValueError
-            If any parameter is invalid.
+            If any parameter is invalid or incompatible with other parameters.
         """
         if self.perplexity <= 0:
             raise ValueError("perplexity must be greater than 0.")
@@ -826,19 +999,20 @@ class TSNEPSO(TransformerMixin, BaseEstimator):
             )
 
     def _check_params_vs_input(self, X):
-        """Check if perplexity is smaller than number of samples.
-
-        Parameters
-        ----------
-        X : ndarray of shape (n_samples, n_features)
-            Input data.
-        """
+        """Validate perplexity against dataset size and adjust if necessary."""
         n_samples = X.shape[0]
-        # We issue a warning if perplexity is too close to n_samples
-        perplexity_threshold = 0.99 * n_samples  # 99% of n_samples
+        self._perplexity_value = self.perplexity
 
+        # Check for absolute perplexity >= n_samples
         if self.perplexity >= n_samples:
-            # Adjust perplexity to be slightly less than n_samples
+            self._perplexity_value = max(1.0, (n_samples - 1) / 3.0)
+            warnings.warn(
+                f"Perplexity {self.perplexity} too high for {n_samples} samples. "
+                f"Using {self._perplexity_value:.1f} instead.",
+                UserWarning,
+            )
+        # Check for perplexity close to n_samples (99% threshold)
+        elif self.perplexity >= 0.99 * n_samples:
             self._perplexity_value = max(1.0, (n_samples - 1) / 3.0)
             warnings.warn(
                 f"Perplexity ({self.perplexity}) should be less than "
@@ -846,30 +1020,26 @@ class TSNEPSO(TransformerMixin, BaseEstimator):
                 f"Using perplexity = {self._perplexity_value:.3f} instead.",
                 UserWarning,
             )
-        elif self.perplexity >= perplexity_threshold:
-            # Warning for perplexity close to n_samples
-            self._perplexity_value = max(1.0, (n_samples - 1) / 3.0)
-            warnings.warn(
-                f"Perplexity ({self.perplexity}) should be less than "
-                f"n_samples ({n_samples}). "
-                f"Using perplexity = {self._perplexity_value:.3f} instead.",
-                UserWarning,
-            )
-        else:
-            self._perplexity_value = self.perplexity
 
     def _adjust_params_for_dataset_size(self, n_samples, n_features):
-        """Adjust parameters based on dataset size and characteristics.
+        """Automatically tune parameters based on dataset characteristics.
 
-        This method dynamically adjusts perplexity, particles count, and other parameters
-        based on the size of the dataset to optimize both performance and quality.
+        This method implements an adaptive parameter selection strategy that
+        adjusts key parameters based on the dataset size and dimensionality.
+        The goal is to optimize both the quality of the embedding and
+        computational efficiency.
+
+        For small datasets, it reduces the number of particles and iterations
+        while adjusting perplexity to appropriate levels. For larger datasets,
+        it maintains more particles to ensure thorough exploration of the
+        embedding space.
 
         Parameters
         ----------
         n_samples : int
             Number of samples in the dataset
         n_features : int
-            Number of features in the dataset
+            Number of features in the dataset (ignored for precomputed distances)
         """
         # Store original parameters for reference
         self._original_params = {
@@ -891,7 +1061,7 @@ class TSNEPSO(TransformerMixin, BaseEstimator):
 
             if self.perplexity > recommended_perplexity:
                 if self.verbose:
-                    print(
+                    logger.info(
                         f"Small dataset detected (n={n_samples}). Adjusting perplexity from "
                         f"{self.perplexity} to {recommended_perplexity}"
                     )
@@ -915,7 +1085,7 @@ class TSNEPSO(TransformerMixin, BaseEstimator):
 
             if self.perplexity > recommended_perplexity:
                 if self.verbose:
-                    print(
+                    logger.info(
                         f"Medium dataset detected (n={n_samples}). Adjusting perplexity from "
                         f"{self.perplexity} to {recommended_perplexity}"
                     )
@@ -936,34 +1106,67 @@ class TSNEPSO(TransformerMixin, BaseEstimator):
             self.perplexity != self._original_params["perplexity"]
             or self.n_particles != self._original_params["n_particles"]
         ):
-            print(f"Parameter adjustments for dataset size {n_samples}:")
-            print(
+            logger.info(f"Parameter adjustments for dataset size {n_samples}:")
+            logger.info(
                 f"  - Perplexity: {self._original_params['perplexity']} -> {self.perplexity}"
             )
-            print(
+            logger.info(
                 f"  - Particles: {self._original_params['n_particles']} -> {self.n_particles}"
             )
             if self.n_iter != self._original_params["n_iter"]:
-                print(
+                logger.info(
                     f"  - Iterations: {self._original_params['n_iter']} -> {self.n_iter}"
                 )
 
+        # Add assertions for parameter validation
+        assert self.perplexity > 0, "Perplexity must be positive"
+        assert self.n_particles > 0, "Number of particles must be positive"
+        assert self.n_iter > 0, "Number of iterations must be positive"
+        assert (
+            self.perplexity < n_samples
+        ), "Perplexity must be less than number of samples"
+
     def _initialize_particles(self, X, random_state):
-        """Initialize particles for PSO optimization.
+        """Initialize particles for PSO optimization with diverse starting positions.
+
+        This method creates the initial set of particles for the PSO algorithm,
+        with each particle representing a candidate embedding. For efficiency and
+        quality, different initialization strategies are used based on the dataset
+        size and the specified initialization method.
+
+        The method computes the joint probability distribution P in the high-dimensional
+        space, which is shared among all particles and used to evaluate embedding quality.
+        Particles are initialized with positions, velocities, and personal best
+        information, with the global best tracked across all particles.
 
         Parameters
         ----------
         X : ndarray of shape (n_samples, n_features)
-            Input data.
+            Input data matrix to be embedded.
 
         random_state : RandomState instance
-            Random number generator.
+            Random number generator for reproducible initialization.
 
         Returns
         -------
         particles : list of dict
-            List of particles with their positions, velocities, personal best positions,
-            personal best scores, and evaluations of the fitness function.
+            List of initialized particles, each containing:
+            - position: Current coordinates in embedding space
+            - velocity: Current velocity vector
+            - best_position: Best position found by this particle
+            - best_score: Best score achieved by this particle
+            - P: Joint probability matrix for KL divergence calculation
+            - grad_update: Gradient information for hybrid approach
+            - gains: Adaptive gains for hybrid approach
+
+        Notes
+        -----
+        For small datasets, a specialized initialization approach is used that tries
+        multiple strategies and selects the most promising starting configurations.
+        This helps overcome the challenges of local minima in small datasets.
+
+        The joint probability matrix P is computed once and reused across all
+        particles, applying early exaggeration to encourage initial cluster formation.
         """
         n_samples = X.shape[0]
 
@@ -1124,27 +1327,43 @@ class TSNEPSO(TransformerMixin, BaseEstimator):
         return particles
 
     def _initialize_particles_for_small_dataset(self, X, distances, random_state):
-        """Special particle initialization approach for small datasets.
+        """Special particle initialization strategy for small datasets.
 
-        For small datasets, we need a more careful initialization to avoid poor
-        local minima. This method tries different initialization strategies and
-        selects the best starting points based on initial KL divergence.
+        Small datasets are particularly challenging for dimensionality reduction
+        because they provide less information to guide the optimization process
+        and are more prone to poor local minima. This method implements a multi-strategy
+        approach that:
+
+        1. Tries different initialization methods (PCA, t-SNE, UMAP, random)
+        2. Evaluates the initial KL divergence for each candidate
+        3. Selects the most promising starting points for the particles
+        4. Ensures diversity through controlled perturbation
+
+        This comprehensive approach significantly improves the quality of embeddings
+        for small datasets by providing better starting points for the PSO algorithm.
 
         Parameters
         ----------
         X : ndarray of shape (n_samples, n_features)
-            Input data.
+            Input data matrix to be embedded.
 
         distances : ndarray of shape (n_samples, n_samples)
-            Pairwise distance matrix.
+            Pairwise distance matrix between data points.
 
         random_state : RandomState instance
-            Random number generator.
+            Random number generator for reproducible initialization.
 
         Returns
         -------
         particles : list of dict
-            List of initialized particles with better starting positions.
+            List of initialized particles with optimized starting positions.
+
+        Notes
+        -----
+        For very small datasets, even subtle differences in initialization can
+        dramatically affect the final embedding quality. This method increases
+        robustness by trying different perplexity values and initialization
+        approaches, selecting those with the lowest initial KL divergence.
         """
         n_samples = X.shape[0]
         n_features = X.shape[1] if self.metric != "precomputed" else 0
@@ -1233,7 +1452,7 @@ class TSNEPSO(TransformerMixin, BaseEstimator):
                 candidate_scores.append(kl_div)
             except Exception as e:
                 if self.verbose:
-                    print(
+                    logger.warning(
                         f"t-SNE initialization with perplexity {perp} failed: {str(e)}"
                     )
 
@@ -1260,7 +1479,7 @@ class TSNEPSO(TransformerMixin, BaseEstimator):
                 candidate_scores.append(kl_div)
             except Exception as e:
                 if self.verbose:
-                    print(f"UMAP initialization failed: {str(e)}")
+                    logger.warning(f"UMAP initialization failed: {str(e)}")
 
         # 4. Add some random initializations
         for i in range(3):  # Add three random initializations with different scales
@@ -1281,8 +1500,8 @@ class TSNEPSO(TransformerMixin, BaseEstimator):
 
         # Print stats on initialization candidates if verbose
         if self.verbose:
-            print(f"Generated {len(candidate_scores)} initialization candidates")
-            print(
+            logger.info(f"Generated {len(candidate_scores)} initialization candidates")
+            logger.info(
                 f"Best initial KL: {min(candidate_scores):.4f}, Worst: {max(candidate_scores):.4f}"
             )
 
@@ -1356,18 +1575,57 @@ class TSNEPSO(TransformerMixin, BaseEstimator):
             particle["global_best_score"] = best_score
 
         if self.verbose:
-            print(
+            logger.info(
                 f"Small dataset optimization: Best initial KL divergence = {best_score:.4f}"
             )
 
         return particles
 
     def _optimize_embedding(self, X, random_state):
-        """Optimize embedding using Particle Swarm Optimization.
+        """Optimize the embedding using Particle Swarm Optimization.
 
-        This function implements the core t-SNE-PSO algorithm as described in Allaoui et al. (2025).
-        It uses Particle Swarm Optimization with dynamic cognitive and social weights
-        to minimize the KL divergence between high-dimensional and low-dimensional distributions.
+        This method implements the core t-SNE-PSO algorithm. It iteratively updates
+        particle positions and velocities to minimize the KL divergence between
+        high-dimensional and low-dimensional distributions.
+
+        The optimization process consists of multiple phases:
+        1. Early exaggeration phase: Emphasizes natural cluster structure
+        2. Main optimization phase: Refines the embedding with dynamic parameters
+        3. Convergence monitoring: Tracks progress and applies early stopping
+
+        Throughout optimization, multiple strategies are employed to escape local
+        minima and improve exploration, including adaptive parameter adjustment,
+        particle perturbation, and periodic reinitialization of the worst particles.
+
+        Parameters
+        ----------
+        X : ndarray of shape (n_samples, n_features)
+            Input data matrix to be embedded.
+
+        random_state : RandomState instance
+            Random number generator for reproducible optimization.
+
+        Returns
+        -------
+        best_position : ndarray of shape (n_samples, n_components)
+            Optimized embedding coordinates.
+
+        best_cost : float
+            Final KL divergence value of the optimized embedding.
+
+        n_iter : int
+            Actual number of iterations performed.
+
+        Notes
+        -----
+        The algorithm adapts PSO parameters dynamically based on optimization progress.
+        Inertia weight decreases over time to improve convergence, while cognitive
+        and social weights are adjusted according to the formulas from the original
+        t-SNE-PSO paper to balance exploration and exploitation.
+
+        When use_hybrid=True, gradient descent steps are interspersed with PSO updates
+        to leverage the strengths of both approaches: PSO for global exploration and
+        gradient descent for local refinement.
         """
         n_samples = X.shape[0]
 
@@ -1405,7 +1663,7 @@ class TSNEPSO(TransformerMixin, BaseEstimator):
         else:
             iterator = range(self.n_iter)
             if self.verbose:
-                print("tqdm not available. Not showing progress bar.")
+                logger.info("tqdm not available. Not showing progress bar.")
 
         exaggeration_phase = True
         exaggeration_iter = min(
@@ -1416,7 +1674,7 @@ class TSNEPSO(TransformerMixin, BaseEstimator):
         if n_samples < 200:
             exaggeration_iter = min(125, self.n_iter // 5)  # 20% for small datasets
             if self.verbose:
-                print(
+                logger.info(
                     f"Small dataset detected, using shorter exaggeration phase: {exaggeration_iter} iterations"
                 )
 
@@ -1460,8 +1718,10 @@ class TSNEPSO(TransformerMixin, BaseEstimator):
                 best_position_history.append(global_best_position.copy())
 
                 if self.verbose:
-                    print(f"Ending early exaggeration phase at iteration {iter_num}")
-                    print(
+                    logger.info(
+                        f"Ending early exaggeration phase at iteration {iter_num}"
+                    )
+                    logger.info(
                         f"Updated KL divergence after exaggeration: {global_best_score:.4f}"
                     )
 
@@ -1576,10 +1836,11 @@ class TSNEPSO(TransformerMixin, BaseEstimator):
                                     f"{score:.4f}"
                                 )
                             else:
-                                print(
-                                    f"Iteration {iter_num}: New best score = "
-                                    f"{score:.4f}"
-                                )
+                                logger.info(
+                                f"Iteration {iter_num}: New best score = {score:.4f}"
+                            )
+
+                            
 
                         # Reset progress counter
                         n_iter_without_progress = 0
@@ -1603,7 +1864,7 @@ class TSNEPSO(TransformerMixin, BaseEstimator):
 
             if n_iter_without_progress >= adaptive_patience:
                 if self.verbose > 0:
-                    print(f"Converged after {iter_num + 1} iterations")
+                    logger.info(f"Converged after {iter_num + 1} iterations")
                 break
 
             # Every 100 iterations, attempt to reinitialize worst performing particles
@@ -1651,21 +1912,35 @@ class TSNEPSO(TransformerMixin, BaseEstimator):
         return best_position, best_cost, iter_num + 1
 
     def _validate_data(self, X, y=None):
-        """Validate the input data.
+        """Validate input data format and characteristics.
+
+        This method ensures that the input data meets the requirements for
+        t-SNE-PSO processing. It handles both feature matrices and precomputed
+        distance matrices, applying appropriate validation checks to each.
+
+        For precomputed distances, it verifies that the matrix is square and
+        contains only non-negative values. For feature matrices, it ensures
+        appropriate numerical format and minimum sample count.
 
         Parameters
         ----------
         X : ndarray of shape (n_samples, n_features) or (n_samples, n_samples)
-            If the metric is 'precomputed' X must be a square distance
-            matrix. Otherwise it contains a sample per row.
+            Input data matrix. If metric='precomputed', this should be a
+            square distance matrix between samples.
 
         y : None
-            Ignored.
+            Ignored. Present for API consistency.
 
         Returns
         -------
         X : ndarray
-            The validated input.
+            The validated input data.
+
+        Raises
+        ------
+        ValueError
+            If the input data does not meet the requirements, such as
+            non-square precomputed distance matrix or negative values.
         """
         if self.metric == "precomputed":
             X = check_array(
@@ -1690,21 +1965,39 @@ class TSNEPSO(TransformerMixin, BaseEstimator):
         return X
 
     def fit(self, X, y=None):
-        """Fit t-SNE model to X.
+        """Fit t-SNE-PSO model to X, computing the optimized embedding.
+
+        This method performs the complete t-SNE-PSO algorithm:
+        1. Validates input parameters and data
+        2. Adjusts parameters based on dataset characteristics
+        3. Computes pairwise similarities in high-dimensional space
+        4. Initializes the swarm of particles
+        5. Optimizes the embedding using PSO and hybrid approaches
+        6. Stores the final embedding and optimization statistics
+
+        The resulting embedding is stored in the embedding_ attribute, along
+        with diagnostics such as the final KL divergence and convergence history.
 
         Parameters
         ----------
         X : ndarray of shape (n_samples, n_features) or (n_samples, n_samples)
-            If the metric is 'precomputed' X must be a square distance
-            matrix. Otherwise it contains a sample per row.
+            Input data matrix to be embedded. If metric='precomputed', this should
+            be a square distance matrix.
 
         y : Ignored
-            Not used, present for API consistency by convention.
+            Not used, present for API consistency.
 
         Returns
         -------
         self : object
-            Returns the instance itself.
+            Returns the instance itself, allowing for method chaining.
+
+        Notes
+        -----
+        The optimization process automatically adapts to the characteristics of
+        the dataset. For small datasets, special initialization strategies are
+        employed to improve embedding quality. The perplexity parameter is
+        automatically adjusted if it exceeds dataset constraints.
         """
         self._validate_parameters()
 
@@ -1735,6 +2028,14 @@ class TSNEPSO(TransformerMixin, BaseEstimator):
                     UserWarning,
                 )
 
+        # Add init array validation
+        if isinstance(self.init, np.ndarray):
+            if self.init.shape != (X.shape[0], self.n_components):
+                raise ValueError(
+                    f"init.shape={self.init.shape} but should be "
+                    f"(n_samples, n_components)=({X.shape[0]}, {self.n_components})"
+                )
+
         random_state = check_random_state(self.random_state)
         self.embedding_, self.kl_divergence_, self.n_iter_ = self._optimize_embedding(
             X, random_state
@@ -1743,27 +2044,37 @@ class TSNEPSO(TransformerMixin, BaseEstimator):
         return self
 
     def fit_transform(self, X, y=None):
-        """Fit t-SNE model to X and return the embedding.
+        """Fit t-SNE-PSO model to X and return the optimized embedding.
+
+        This convenience method performs model fitting and returns the
+        low-dimensional embedding in a single call. It is equivalent to
+        calling fit(X) followed by accessing the embedding_ attribute.
 
         Parameters
         ----------
         X : ndarray of shape (n_samples, n_features) or (n_samples, n_samples)
-            If the metric is 'precomputed' X must be a square distance
-            matrix. Otherwise it contains a sample per row.
+            Input data matrix to be embedded. If metric='precomputed', this should
+            be a square distance matrix.
 
         y : Ignored
-            Not used, present for API consistency by convention.
+            Not used, present for API consistency.
 
         Returns
         -------
         embedding : ndarray of shape (n_samples, n_components)
-            Embedding of the training data in low-dimensional space.
+            Low-dimensional embedding of the input data.
+
+        Notes
+        -----
+        This is the recommended method for one-time embedding of data, as it
+        provides a simpler interface than separate fit() and transform() calls.
         """
         self.fit(X)
         return self.embedding_
 
     def transform(self, X):
         """Transform X to the embedded space.
+
 
         This is not implemented for t-SNE, as it does not support the transform
         method. New data points cannot be transformed to the embedded space

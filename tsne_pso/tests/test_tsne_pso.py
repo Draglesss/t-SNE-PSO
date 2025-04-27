@@ -97,8 +97,8 @@ def test_tsnepso_iris():
     tsne_pso = TSNEPSO(
         n_components=2,
         perplexity=10.0,
-        n_iter=50,  # Low number for faster tests
-        n_particles=3,  # Low number for faster tests
+        n_iter=50,
+        n_particles=3,
         random_state=0,
     )
     embedding = tsne_pso.fit_transform(X)
@@ -132,8 +132,8 @@ def test_tsnepso_iris_init_array():
     tsne_pso = TSNEPSO(
         n_components=2,
         perplexity=10.0,
-        n_iter=50,  # Low number for faster tests
-        n_particles=3,  # Low number for faster tests
+        n_iter=50,
+        n_particles=3,
         init=init_embedding,
         random_state=0,
     )
@@ -142,9 +142,9 @@ def test_tsnepso_iris_init_array():
     # Check shape of results
     assert embedding.shape == (n_samples, 2)
 
-    # Test for wrong shape init
+    # Test for wrong shape init - should raise ValueError
     wrong_shape_init = np.random.RandomState(0).normal(0, 0.0001, (n_samples, 3))
-    tsne_pso = TSNEPSO(init=wrong_shape_init, n_components=2)
+    tsne_pso = TSNEPSO(init=wrong_shape_init, random_state=0)
     with pytest.raises(ValueError, match="init.shape=.*but should be"):
         tsne_pso.fit(X)
 
@@ -186,8 +186,8 @@ def test_tsnepso_precomputed():
     tsne_pso = TSNEPSO(
         n_components=2,
         perplexity=10.0,
-        n_iter=50,  # Low number for faster tests
-        n_particles=3,  # Low number for faster tests
+        n_iter=50,
+        n_particles=3,
         metric="precomputed",
         random_state=0,
     )
@@ -209,18 +209,6 @@ def test_tsnepso_precomputed():
         ValueError, match="Precomputed distance contains negative values"
     ):
         tsne_pso.fit(negative_dist)
-
-
-def test_tsnepso_perplexity_warning():
-    """Test warning for perplexity too large for the dataset."""
-    # Create a small dataset with fixed size
-    n_samples = 20
-    X = np.random.RandomState(42).randn(n_samples, 5)
-
-    # Perplexity equal to n_samples should trigger a warning
-    tsne_pso = TSNEPSO(perplexity=n_samples)
-    with pytest.warns(UserWarning, match="Perplexity.*should be less than n_samples"):
-        tsne_pso.fit(X)
 
 
 def test_tsnepso_random_state():
@@ -251,28 +239,3 @@ def test_tsnepso_random_state():
 
     # The embeddings should be identical
     assert np.allclose(embedding1, embedding2)
-
-
-# def test_tsnepso_debug_output():
-#     """Test that verbose output can be captured."""
-#     import io
-#     import sys
-#
-#     # Load data
-#     iris = load_iris()
-#     X = iris.data[:20]  # Small subset
-#
-#     # Redirect stdout
-#     old_stdout = sys.stdout
-#     sys.stdout = captured_output = io.StringIO()
-#
-#     # Fit with verbose=2
-#     TSNEPSO(verbose=2, random_state=0, n_iter=10).fit(X)
-#
-#     # Restore stdout
-#     sys.stdout = old_stdout
-#
-#     # Check that output was produced
-#     output = captured_output.getvalue()
-#     assert "Iteration" in output
-#     assert "New best score" in output

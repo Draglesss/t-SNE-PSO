@@ -15,10 +15,14 @@ t-Distributed Stochastic Neighbor Embedding with Particle Swarm Optimization (TS
 - **scikit-learn Compatible**: Follows scikit-learn's API conventions for easy integration
 
 ## New in 1.1.6:
-
-*   **Lightning Fast:** Up to 62% faster embedding times!
-*   **Sharper Results:** 15% lower KL divergence scores for clearer cluster separation
-*   **Super Efficient:** Reaches optimal embeddings in 73% fewer steps
+* **Performance Improvements:** Significant reduction in embedding computation time, with up to 62% faster execution
+* **Optimization Quality:** Achieves 15% reduction in KL divergence scores, resulting in improved cluster definition
+* **Convergence Speed:** Reaches convergence in 73% fewer iterations compared to standard t-SNE
+* **Dynamic Weight Adaptation:** Implements automated adjustment of cognitive and social weights throughout optimization
+* **Parameter Optimization:** Features automatic tuning of key parameters based on input data characteristics
+* **Small Dataset Handling:** Employs specialized initialization strategies optimized for limited sample sizes
+* **Hybrid Optimization:** Integrates particle swarm optimization with gradient descent for comprehensive search
+* **Numerical Robustness:** Enhanced stability through improved error handling and numerical precision
 
 ## Installation
 
