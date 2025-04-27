@@ -1237,7 +1237,7 @@ class TSNEPSO(TransformerMixin, BaseEstimator):
                 n_components=self.n_components,
                 perplexity=self._perplexity_value,
                 n_iter=250,
-                random_state=random_state.randint(0, 2**32 - 1),
+                random_state=random_state.randint(0, np.iinfo(np.int32).max),
             )
             first_embedding = tsne.fit_transform(X)
             embeddings.append(first_embedding)
@@ -1253,7 +1253,7 @@ class TSNEPSO(TransformerMixin, BaseEstimator):
                 n_components=self.n_components,
                 n_neighbors=min(int(self._perplexity_value), n_samples - 1),
                 min_dist=0.1,
-                random_state=random_state.randint(0, 2**32 - 1),
+                random_state=random_state.randint(0, np.iinfo(np.int32).max),
             )
             first_embedding = reducer.fit_transform(X)
             embeddings.append(first_embedding)
@@ -1267,7 +1267,7 @@ class TSNEPSO(TransformerMixin, BaseEstimator):
             # Use PCA for initialization of first particle
             pca = PCA(
                 n_components=self.n_components,
-                random_state=random_state.randint(0, 2**32 - 1),
+                random_state=random_state.randint(0, np.iinfo(np.int32).max),
             )
             first_embedding = pca.fit_transform(X)
 
@@ -1382,7 +1382,7 @@ class TSNEPSO(TransformerMixin, BaseEstimator):
         if n_features > 0:  # Skip for precomputed distances
             pca = PCA(
                 n_components=self.n_components,
-                random_state=random_state.randint(0, 2**32 - 1),
+                random_state=random_state.randint(0, np.iinfo(np.int32).max),
             )
             pca_embedding = pca.fit_transform(X)
             pca_embedding = pca_embedding / np.std(pca_embedding[:, 0]) * 0.0001
@@ -1423,7 +1423,7 @@ class TSNEPSO(TransformerMixin, BaseEstimator):
                     n_components=self.n_components,
                     perplexity=perp,
                     n_iter=250,
-                    random_state=random_state.randint(0, 2**32 - 1),
+                    random_state=random_state.randint(0, np.iinfo(np.int32).max),
                 )
                 tsne_embedding = tsne.fit_transform(X)
                 candidate_embeddings.append(tsne_embedding)
@@ -1463,7 +1463,7 @@ class TSNEPSO(TransformerMixin, BaseEstimator):
                     n_components=self.n_components,
                     n_neighbors=min(int(self._perplexity_value), n_samples - 1),
                     min_dist=0.1,
-                    random_state=random_state.randint(0, 2**32 - 1),
+                    random_state=random_state.randint(0, np.iinfo(np.int32).max),
                 )
                 umap_embedding = reducer.fit_transform(X)
                 candidate_embeddings.append(umap_embedding)
