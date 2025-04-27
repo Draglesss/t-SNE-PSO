@@ -68,17 +68,11 @@ MACHINE_EPSILON = np.finfo(float).eps
 MAX_VAL = np.finfo(float).max
 MIN_VAL = np.finfo(float).min
 
-# Determine the maximum seed value based on platform
-_PLATFORM_SYSTEM = platform.system()
-_MAX_SEED_VALUE = 2**31 - 1  # Windows safe limit
+_MAX_SEED_VALUE = 2**32 - 1
 
 
 def _get_safe_random_seed(random_state):
-    """Generate a random seed that is safe for all platforms while maintaining distribution quality.
-
-    Instead of simply truncating the range on Windows, this function ensures a consistent
-    statistical distribution of seeds across all platforms by using a hash-based approach
-    when needed.
+    """Generate a random seed that works across all platforms while maintaining quality.
 
     Parameters
     ----------
@@ -88,20 +82,11 @@ def _get_safe_random_seed(random_state):
     Returns
     -------
     int
-        A random seed suitable for all platforms
+        A random seed suitable for all platforms (0 <= seed <= 2³¹-1)
     """
-    # Generate a full-range random number as a reference point
-    full_range_random = random_state.randint(0, 2**32 - 1)
-
-    # For non-Windows platforms, we can directly use the full range
-    if _PLATFORM_SYSTEM != "Windows":
-        return full_range_random
-
-    hash_obj = hashlib.md5(str(full_range_random).encode())
-    # Convert first 4 bytes of hash to integer and take modulo to fit within safe range
-    mapped_value = int(hash_obj.hexdigest()[:8], 16) % _MAX_SEED_VALUE
-
-    return mapped_value
+    # Directly generate within safe range using bitmasking
+    raw_seed = random_state.randint(0, _MAX_SEED_VALUE + 1, dtype=np.uint32)
+    return int(raw_seed)
 
 
 def compute_joint_probabilities(

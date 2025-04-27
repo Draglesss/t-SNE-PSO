@@ -36,4 +36,4 @@ dependencies = [
 [project.urls]
 Homepage = "https://github.com/draglesss/t-SNE-PSO"
 "Bug Tracker" = "https://github.com/draglesss/t-SNE-PSO/issues"
-"Documentation" = "https://github.com/draglesss/t-SNE-PSO#readme" 
+"Documentation" = "https://github.com/draglesss/t-SNE-PSO#readme"
