@@ -27,6 +27,8 @@ from sklearn.metrics import pairwise_distances
 from sklearn.utils import check_random_state
 from sklearn.utils._param_validation import Interval, StrOptions
 from sklearn.utils.validation import check_array, check_is_fitted
+import platform
+import hashlib
 
 try:
     import umap
@@ -66,6 +68,39 @@ MACHINE_EPSILON = np.finfo(float).eps
 MAX_VAL = np.finfo(float).max
 MIN_VAL = np.finfo(float).min
 
+# Determine the maximum seed value based on platform
+_PLATFORM_SYSTEM = platform.system()
+_MAX_SEED_VALUE = 2**31 - 1  # Windows safe limit
+
+def _get_safe_random_seed(random_state):
+    """Generate a random seed that is safe for all platforms while maintaining distribution quality.
+    
+    Instead of simply truncating the range on Windows, this function ensures a consistent
+    statistical distribution of seeds across all platforms by using a hash-based approach
+    when needed.
+    
+    Parameters
+    ----------
+    random_state : RandomState
+        NumPy random state object
+        
+    Returns
+    -------
+    int
+        A random seed suitable for all platforms
+    """
+    # Generate a full-range random number as a reference point
+    full_range_random = random_state.randint(0, 2**32 - 1)
+    
+    # For non-Windows platforms, we can directly use the full range
+    if _PLATFORM_SYSTEM != "Windows":
+        return full_range_random
+        
+    hash_obj = hashlib.md5(str(full_range_random).encode())
+    # Convert first 4 bytes of hash to integer and take modulo to fit within safe range
+    mapped_value = int(hash_obj.hexdigest()[:8], 16) % _MAX_SEED_VALUE
+    
+    return mapped_value
 
 def compute_joint_probabilities(
     distances: np.ndarray, perplexity: float, verbose: bool = False
@@ -1237,7 +1272,7 @@ class TSNEPSO(TransformerMixin, BaseEstimator):
                 n_components=self.n_components,
                 perplexity=self._perplexity_value,
                 n_iter=250,
-                random_state=random_state.randint(0, np.iinfo(np.int32).max),
+                random_state=random_state.randint(0, 2**31 - 1),
             )
             first_embedding = tsne.fit_transform(X)
             embeddings.append(first_embedding)
@@ -1253,7 +1288,7 @@ class TSNEPSO(TransformerMixin, BaseEstimator):
                 n_components=self.n_components,
                 n_neighbors=min(int(self._perplexity_value), n_samples - 1),
                 min_dist=0.1,
-                random_state=random_state.randint(0, np.iinfo(np.int32).max),
+                random_state=random_state.randint(0, 2**31 - 1),
             )
             first_embedding = reducer.fit_transform(X)
             embeddings.append(first_embedding)
@@ -1267,7 +1302,7 @@ class TSNEPSO(TransformerMixin, BaseEstimator):
             # Use PCA for initialization of first particle
             pca = PCA(
                 n_components=self.n_components,
-                random_state=random_state.randint(0, np.iinfo(np.int32).max),
+                random_state=_get_safe_random_seed(random_state),
             )
             first_embedding = pca.fit_transform(X)
 
@@ -1382,7 +1417,7 @@ class TSNEPSO(TransformerMixin, BaseEstimator):
         if n_features > 0:  # Skip for precomputed distances
             pca = PCA(
                 n_components=self.n_components,
-                random_state=random_state.randint(0, np.iinfo(np.int32).max),
+                random_state=_get_safe_random_seed(random_state),
             )
             pca_embedding = pca.fit_transform(X)
             pca_embedding = pca_embedding / np.std(pca_embedding[:, 0]) * 0.0001
@@ -1423,7 +1458,7 @@ class TSNEPSO(TransformerMixin, BaseEstimator):
                     n_components=self.n_components,
                     perplexity=perp,
                     n_iter=250,
-                    random_state=random_state.randint(0, np.iinfo(np.int32).max),
+                    random_state=_get_safe_random_seed(random_state),
                 )
                 tsne_embedding = tsne.fit_transform(X)
                 candidate_embeddings.append(tsne_embedding)
@@ -1463,7 +1498,7 @@ class TSNEPSO(TransformerMixin, BaseEstimator):
                     n_components=self.n_components,
                     n_neighbors=min(int(self._perplexity_value), n_samples - 1),
                     min_dist=0.1,
-                    random_state=random_state.randint(0, np.iinfo(np.int32).max),
+                    random_state=_get_safe_random_seed(random_state),
                 )
                 umap_embedding = reducer.fit_transform(X)
                 candidate_embeddings.append(umap_embedding)
