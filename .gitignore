@@ -84,6 +84,7 @@ secrets_config.py
 credentials/
 **/token.json
 **/credentials.json
+tsne_pso_cpp/
 
 # Temporary and backup files
 *.tmp
@@ -97,4 +98,4 @@ credentials/
 # Project specific
 examples/output/
 *.log
-.pypirc 
+.pypirc tsne_pso_cpp/
